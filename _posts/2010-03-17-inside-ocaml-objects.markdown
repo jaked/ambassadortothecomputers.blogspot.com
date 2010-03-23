@@ -334,43 +334,44 @@ to make the call.
 
 These are always public method calls, so they use the `Lsend` lambda
 form. We don't want to do method label dispatch, since Javascript
-already has dispatch by name, so the first change is to carry the name
+already has dispatch by name, so first off we need to carry the name
 rather than the label in `Lsend`.
 
 We have seen how `self` is passed as the first argument when methods
-are invoked. We can't do that for an arbitrary Javascript
-function. Moreover the function may make reference to `this`, so we
-have to ensure that `this` holds a reference to the object.
+are invoked. We can't do that for an arbitrary Javascript function,
+but the function might use `this`, so we need to be sure that `this`
+points to the object.
 
 There is no way to know at compile time whether a particular method
-invocation is on a regular Javascript object or to an OCaml
-object. Maybe we could mark OCaml objects somehow and do a check at
-runtime, but I decided to stick with a single calling convention. So
-whatever OCaml objects compile to, they have to support the convention
-for regular Javascript objects---`foo#bar` compiles to `foo.bar`, with
-`this` set to `foo`.
+invocation is on a regular Javascript object or an OCaml object. Maybe
+we could mark OCaml objects somehow and do a check at runtime, but I
+decided to stick with a single calling convention. So whatever OCaml
+objects compile to, they have to support the convention for regular
+Javascript objects---`foo#bar` compiles to `foo.bar`, with `this` set
+to `foo`.
 
 As we have seen, self-calls are compiled to a slot lookup rather than
 a name lookup, so we also need to support indexing into `methods`.
 
 So here's the design: an OCaml object is represented by a Javascript
 object, with numbered slots containing the instance variables. There
-is a constructor for each class, with the `prototype` set up so that
-each method is accessible by name, and the whole `methods` block is
+is a constructor for each class, with `prototype` set up so each
+method is accessible by name, and the whole `methods` block is
 accessible in a special field, so we can call by slot. (Since we don't
 need method labels, `methods` just holds functions.)
 
 The calling convention passes `self` in `this`, so we bind a local
-`self` variable to `this` on entry to every method. It doesn't work to
+`self` variable to `this` on entry to each method. It doesn't work to
 say `this` everywhere instead of `self`, because `this` in Javascript
 is a bit fragile. In particular, if you define and apply a local
-function, `this` is null rather than the lexically-visible `this`.
+function (`ocamljs` does this frequently), `this` is null rather than
+the lexically-visible `this`.
 
 For `sendself` we look up the function by slot in the special methods
-field. Finally, for super-calls, we know the function at compile
-time. In these cases the function is applied directly, but we need to
-take care to treat it as a method application rather than an ordinary
-function call, since the calling convention is different.
+field. Finally, for super-calls, we know the function at class
+construction time. In this case the function is applied directly, but
+we need to take care to treat it as a method application rather than
+an ordinary function call, since the calling convention is different.
 
 <b>The bug</b>
 
