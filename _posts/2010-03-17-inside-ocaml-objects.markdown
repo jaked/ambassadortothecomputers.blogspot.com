@@ -1,5 +1,5 @@
 ---
-layout: blogspot
+layout: post
 title: Inside OCaml Objects
 ---
 
