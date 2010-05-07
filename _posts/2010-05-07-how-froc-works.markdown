@@ -3,6 +3,10 @@ layout: post
 title: How froc works
 ---
 
+<style>
+.post img { border: none; }
+</style>
+
 I am happy to announce the release of version 0.2 of the `froc`
 library for functional reactive programming in OCaml. There are a
 number of improvements:
@@ -295,7 +299,7 @@ Here is the `List.map` function, translated to work over lists
 where the tail is changeable.
 
 {% highlight ocaml %}
-  type 'a lst = Nil | Cons of 'a lst t
+  type 'a lst = Nil | Cons of 'a * 'a lst t
 
   let rec map f lst =
     lst >>= function
