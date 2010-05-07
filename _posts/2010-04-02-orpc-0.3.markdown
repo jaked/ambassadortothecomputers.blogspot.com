@@ -1,0 +1,30 @@
+---
+layout: post
+title: orpc 0.3
+---
+
+I am happy to announce version 0.3 of `orpc`, a tool for generating
+RPC bindings from OCaml signatures. Orpc can generate ONC RPC stubs
+for use with
+[Ocamlnet](http://projects.camlcity.org/projects/ocamlnet.html) (in
+place of ocamlrpcgen), and it can also generate RPC over HTTP stubs
+for use with [ocamljs](http://github.com/jaked/ocamljs). You can use
+most OCaml types in interfaces, as well as exceptions and
+labelled/optional arguments.
+
+Changes since version 0.2 include
+
+ * a way to use types defined outside the interface file, so you can
+   use a type in more than one interface
+ * support for polymorphic variants
+ * a way to specify "abstract" interfaces that can be instantiated for
+   synchronous, asynchronous, and Lwt clients and servers
+ * bug fixes
+
+Development of `orpc` has moved from Google Code to Github; see
+
+ * [project page](http://github.com/jaked/orpc)
+ * [documentation](http://jaked.github.com/orpc)
+ * [downloads](http://github.com/jaked/orpc/downloads)
+
+Let me know what you think.
