@@ -205,7 +205,7 @@ branch:
 
 How does this work? `Froc` keeps track of the start and finish
 timestamps when running an expression, and associates dependencies
-with the timestamp when they are attacheed. When an expression is
+with the timestamp when they are attached. When an expression is
 re-run, we detach all the dependencies between the start and finish
 timestamps. In this case, when `b` changes, we detach the dependent
 expression that divides by 0 before trying to run it.
@@ -306,7 +306,7 @@ where the tail is changeable.
       | Nil -> return Nil
       | Cons (h, t) ->
           let t = map f t in
-          return (Cons (h, t))
+          return (Cons (f h, t))
 {% endhighlight %}
 
 What happens if we run
@@ -356,7 +356,7 @@ we're re-running. We can define `map` as a memo function:
         | Nil -> return Nil
         | Cons (h, t) ->
             let t = memo map t in
-            return (Cons (h, t)) in
+            return (Cons (f h, t)) in
     memo map lst
 {% endhighlight %}
 
