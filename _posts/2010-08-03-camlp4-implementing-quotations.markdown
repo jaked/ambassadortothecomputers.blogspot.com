@@ -184,7 +184,7 @@ The file needs the `Camlp4MetaGenerator` filter (the
 the calls to `Camlp4Filters.MetaGenerator{Expr,Patt}` are expanded
 into the lifting functions. But there are a couple of fussy details:
 
-First, the argument module `Jq_ast` which we pass to the generators is
+First: The argument module `Jq_ast` which we pass to the generators is
 used both on the left and right of the generated function; if you look
 at the generated code there are cases like:
 
@@ -193,19 +193,18 @@ at the generated code there are cases like:
 {% endhighlight %}
 
 (The `<:expr< .. >>` is already expanded in the actual generated
-code.) So we need the AST to be available qualified by the module
+code.) We need the AST to be available qualified by the module
 `Jq_ast` both in the current file and also in code that uses the
 quotation. So we have a nested `Jq_ast` module (for local uses, on the
 left-hand side) which we `include` (for external uses, on the
 right-hand side).
 
-Second, the way the generators work is to scan all the types defined
-in the current module, then generate code from the last-appearing
-recursive bundle. (In this case the recursive bundle contains just
-`t`, but in general there can be more than one; mutually recursive
-lifting functions are generated.) There are some special cases for
-predefined types, and in particular for `float`; however, it seems to
-be wrong:
+Second: The generators scan all the types defined in the current
+module, then generate code from the last-appearing recursive
+bundle. (In this case the recursive bundle contains just `t`, but in
+general there can be more than one; mutually recursive lifting
+functions are generated.) There are some special cases for predefined
+types, and in particular for `float`; however, it seems to be wrong:
 
 {% highlight ocaml %}
   let meta_float _loc s = Ast.ExFlo (_loc, s)
