@@ -36,12 +36,10 @@ object
       | p -> super#patt p
 end
 
-open Jq_lexer (* so Jq_lexer.EOI is in scope, not Camlp4.PreCast.Token.EOI *)
-
 let json_eoi = Jq_parser.Gram.Entry.mk "json_eoi"
 
 EXTEND Jq_parser.Gram
-  json_eoi: [[ x = Jq_parser.json; EOI -> x ]];
+  json_eoi: [[ x = Jq_parser.json; `Jq_lexer.EOI -> x ]];
 END;;
 
 let parse_quot_string loc s =

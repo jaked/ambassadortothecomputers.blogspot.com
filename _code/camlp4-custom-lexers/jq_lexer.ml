@@ -12,11 +12,11 @@ end
 let _ = let module M = Camlp4.ErrorHandler.Register(Error) in ()
 
 type token =
-    | KEYWORD  of string
-    | NUMBER   of string
-    | STRING   of string
-    | ANTIQUOT of string * string
-    | EOI
+  | KEYWORD  of string
+  | NUMBER   of string
+  | STRING   of string
+  | ANTIQUOT of string * string
+  | EOI
 
 module Token =
 struct
@@ -45,26 +45,17 @@ struct
     function
       | KEYWORD s | NUMBER s | STRING s -> s
       | tok ->
-          invalid_arg ("Cannot extract a string from this token: "^
-                          to_string tok)
+          invalid_arg
+            ("Cannot extract a string from this token: " ^
+               to_string tok)
 
   module Filter =
   struct
     type token_filter = (t, Loc.t) Camlp4.Sig.stream_filter
-
-    type t = {
-      is_kwd : string -> bool;
-      mutable filter : token_filter
-    }
-
-    let mk is_kwd = {
-      is_kwd = is_kwd;
-      filter = (fun s -> s)
-    }
-
-    let filter x strm = x.filter strm
-    let define_filter x f = x.filter <- f x.filter
-
+    type t = unit
+    let mk _ = ()
+    let filter _ strm = strm
+    let define_filter _ _ = ()
     let keyword_added _ _ _ = ()
     let keyword_removed _ _ = ()
   end
