@@ -151,8 +151,9 @@ let rec token c = lexer
   | newline -> next_line c; token c c.lexbuf
   | blank+ -> token c c.lexbuf
 
-  | '-'? ['0'-'9']+ ('.' ['0'-'9']* )? (('e'|'E')('+'|'-')?(['0'-'9']+))? ->
-      NUMBER (L.utf8_lexeme c.lexbuf)
+  | '-'? ['0'-'9']+ ('.' ['0'-'9']* )?
+      (('e'|'E')('+'|'-')?(['0'-'9']+))? ->
+        NUMBER (L.utf8_lexeme c.lexbuf)
 
   | [ "{}[]:," ] | "null" | "true" | "false" ->
       KEYWORD (L.utf8_lexeme c.lexbuf)
