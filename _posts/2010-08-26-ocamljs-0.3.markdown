@@ -1,0 +1,110 @@
+---
+layout: post
+title: ocamljs 0.3
+---
+
+I am happy to announce version 0.3 of ocamljs. Ocamljs is a system for
+compiling OCaml to Javascript. It includes a Javascript back-end for
+the OCaml compiler, as well as several support libraries, such as
+bindings to the browser DOM. Ocamljs also works with
+[orpc](http://jaked.github.com/orpc) for RPC over HTTP, and
+[froc](http://jaked.github.com/froc) for functional reactive browser
+programming.
+
+Changes since version 0.2 include:
+
+ * support for OCaml 3.11.x and 3.12.0
+ * jQuery binding (contributed by Dave Benjamin)
+ * full support for OCaml objects (interoperable with Javascript objects)
+ * Lwt 2.x support
+ * ocamllex and ocamlyacc support
+ * better interoperability with Javascript
+ * many small fixes and improvements
+
+Development of ocamljs has moved from Google Code to Github; see
+
+ * project page: <http://github.com/jaked/ocamljs>
+ * documentation: <http://jaked.github.com/ocamljs>
+ * downloads: <http://github.com/jaked/ocamljs/downloads>
+
+<b>Comparison to js_of_ocaml</b>
+
+Since I last did an `ocamljs` release, a new OCaml-to-Javascript
+system has arrived,
+[`js_of_ocaml`](http://ocsigen.org/js_of_ocaml/). I want to say a
+little about how the two systems compare:
+
+`Ocamljs` is a back-end to the existing OCaml compiler; it translates
+the "lambda" intermediate language to Javascript. (This is also where
+the bytecode and native code back-ends connect to the common
+front-end.) `Js_of_ocaml` post-processes ordinary OCaml bytecode
+(compiled and linked with the ordinary OCaml bytecode compiler) into
+Javascript. With `ocamljs` you need a special installation of the
+compiler (and special support for `ocamlbuild` and `ocamlfind`), you
+need to recompile libraries, and you need the OCaml source to build
+it. With `js_of_ocaml` you don't need any of this.
+
+Since `ocamljs` recompiles libraries, it's possible to special-case
+code for the Javascript build to take advantage of Javascript
+facilities. For example, `ocamljs` implements the `Buffer` module on
+top of Javascript arrays instead of strings, for better
+performance. Similarly, it implements `CamlinternalOO` to use
+Javascript method dispatch directly instead of layering OCaml method
+dispatch on top. `Js_of_ocaml` can't do this (or at least it would be
+necessary to recognize the compiled bytecode and replace it with the
+special case).
+
+Because `js_of_ocaml` works from bytecode, it can't always know the
+type of values (at the bytecode level, `int`s, `bool`s, and `char`s
+all have the same representation, for example). This makes
+interoperating with native Javascript more difficult: you usually need
+conversion functions between the OCaml and Javascript representation
+of values when you call a Javascript function from OCaml. `Ocamljs`
+has more information to work with, and can represent OCaml bools as
+Javascript bools, for example, so you can usually call a Javascript
+function from OCaml without conversions.
+
+`Ocamljs` has a mixed representation of strings: literal strings and
+the result of `^`, `Buffer.contents`, and `Printf.sprintf` are all
+immutable Javascript strings; strings created with `String.create` are
+mutable strings implemented by Javascript arrays (with a `toString`
+method which returns the represented string). This is good for
+interoperability---you can usually pass a string directly to
+Javascript---but it doesn't match regular OCaml's semantics, and it
+can cause runtime failures (e.g. if you try to mutate an immutable
+string). `Js_of_ocaml` implements only mutable strings, so you need
+conversions when calling Javascript, but the semantics match regular
+OCaml.
+
+With `ocamljs`, Javascript objects can be called from OCaml using the
+ordinary OCaml method-call syntax, and objects written in OCaml can be
+called using the ordinary Javascript syntax. With `js_of_ocaml`, a
+special syntax is needed to call Javascript objects, and OCaml objects
+can't easily be called from Javascript. However, there is an advantage
+to having a special call syntax: with `ocamljs` it is not possible to
+partially apply calls to native Javascript methods, but this is not
+caught by the compiler, so there can be a runtime failure.
+
+`Ocamljs` supports inline Javascript, while `js_of_ocaml` does not. I
+think it might be possible for `js_of_ocaml` to do so using the same
+approach that `ocamljs` takes: use Camlp4 quotations to embed a syntax
+tree, then convert the syntax tree from its OCaml representation (as
+lambda code or bytecode) into Javascript. However, you would still
+need conversion functions between OCaml and Javascript values.
+
+I haven't compared the performance of the two systems. It seems like
+there must be a speed penalty to translating from bytecode compared to
+translating from lambda code. On the other hand, while `ocamljs` is
+very naive in its translation, `js_of_ocaml` makes several
+optimization passes. With many programs it doesn't matter, since most
+of the time is spent in browser code. (For example, the `planet`
+example seems to run at the same speed in
+[`ocamljs`](http://jaked.github.com/ocamljs/examples/dom/planet/) and
+[`js_of_ocaml`](http://ocsigen.org/js_of_ocaml/planet/).) It would be
+interesting to compare them on something computationally intensive
+like Andrej Bauer's [random-art.org](http://random-art.org/).
+
+`Js_of_ocaml` is more complete and careful in its implementation of
+OCaml (e.g. it supports `int64`s), and it generates much more compact
+code than `ocamljs`. I hope to close the gap in these areas, possibly
+by borrowing some code and good ideas from `js_of_ocaml`.
