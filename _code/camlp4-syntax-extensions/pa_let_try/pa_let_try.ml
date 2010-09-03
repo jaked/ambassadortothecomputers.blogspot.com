@@ -21,7 +21,12 @@ struct
                      <:match_case< $p$ when $w$ -> fun () -> $e$ >>
                  | mc -> mc)
               (Ast.list_of_match_case a []) in
-          <:expr< (try let $rec:r$ $bi$ in fun () -> do { $e$ } with [ $list:a$ ])() >> ]
+          <:expr< (try let $rec:r$ $bi$ in fun () -> do { $e$ } with [ $list:a$ ])() >>
+(* original syntax:
+          let e = Ast.ExSeq (Ast.loc_of_expr e, e) in
+          <:expr< (try let $rec:r$ $bi$ in fun () -> $e$ with $list:a$)() >>
+*)
+      ]
     ];
   END
 end
