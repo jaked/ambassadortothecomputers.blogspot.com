@@ -562,6 +562,28 @@ anonymous entry (but can have only one level). For example, the rule
 {% endhighlight %}
 parses both `1 + 2` and `1 plus 2`.
 
+Addendum: A new special symbol appeared in the 3.12.0 release, `TRY`
+*elem*, which provides non-local backtracking: a `Stream.Error`
+occurring in *elem* is converted to a `Stream.Failure`. (It works by
+running *elem* on an on-demand copy of the token stream; tokens are
+not consumed from the real token stream until *elem* succeeds.) `TRY`
+replaces most (all?) cases where you'd need to drop down to a stream
+parser for lookahead. So another way to fix the local backtracking
+example above is:
+
+{% highlight ocaml %}
+EXTEND Gram
+  GLOBAL: expr;
+
+  g: [[ "plugh" ]];
+  f1: [[ g; "quux" ]];
+  f2: [[ g; "xyzzy" ]];
+
+  expr:
+    [[ TRY f1 -> "f1" | f2 -> "f2" ]];
+END
+{% endhighlight %}
+
 ***
 
 Almost the whole point of Camlp4 grammars is that they are
