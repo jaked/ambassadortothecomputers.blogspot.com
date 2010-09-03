@@ -1,0 +1,6 @@
+name="pa_let_try"
+version="0.1"
+description = "Syntax extension for let-try-in-with"
+requires = "camlp4"
+archive(syntax,preprocessor) = "pa_let_try.cmo"
+archive(syntax,toploop) = "pa_let_try.cmo"
