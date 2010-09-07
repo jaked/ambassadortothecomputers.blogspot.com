@@ -1,0 +1,6 @@
+name="pa_alist_patt"
+version="0.1"
+description = "Syntax extension for alist patterns"
+requires = "camlp4"
+archive(syntax,preprocessor) = "pa_alist_patt.cmo"
+archive(syntax,toploop) = "pa_alist_patt.cmo"
