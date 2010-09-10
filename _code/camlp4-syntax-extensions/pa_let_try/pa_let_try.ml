@@ -31,4 +31,4 @@ struct
   END
 end
 
-let module M = Register.OCamlSyntaxExtension(Id)(Make) in ()
+module M = Register.OCamlSyntaxExtension(Id)(Make)

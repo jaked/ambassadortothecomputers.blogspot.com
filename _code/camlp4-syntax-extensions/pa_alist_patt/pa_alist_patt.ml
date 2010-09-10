@@ -13,7 +13,7 @@ struct
 
   EXTEND Gram
     patt: LEVEL "simple"
-    [LEFTA [
+    [[
        "alist"; "[";
          l =
            LIST0
@@ -34,6 +34,16 @@ struct
     fun () ->
       incr id;
       "__pa_alist_patt_"  ^ string_of_int !id
+
+  let expr_tup_of_list _loc = function
+    | [] -> <:expr< () >>
+    | [ v ] -> v
+    | vs -> <:expr< $tup:Ast.exCom_of_list vs$ >>
+
+  let patt_tup_of_list _loc = function
+    | [] -> <:patt< () >>
+    | [ p ] -> p
+    | ps -> <:patt< $tup:Ast.paCom_of_list ps$ >>
 
   let rewrite _loc p w e =
     let k = ref (fun s f -> s) in
@@ -63,22 +73,12 @@ struct
                   List.map
                     (fun (p, _) -> <:patt< Some $p$ >>)
                     l in
-                let vt =
-                  match vs with
-                    | [] -> <:expr< () >>
-                    | [ v ] -> v
-                    | _ -> <:expr< $tup:Ast.exCom_of_list vs$ >> in
-                let pt =
-                  match ps with
-                    | [] -> <:patt< () >>
-                    | [ p ] -> p
-                    | _ -> <:patt< $tup:Ast.paCom_of_list ps$ >> in
                 let k' = !k in
                 k :=
                   (fun s f ->
                      <:expr<
-                       match $vt$ with
-                         | $pt$ -> $k' s f$
+                       match $expr_tup_of_list _loc vs$ with
+                         | $patt_tup_of_list _loc ps$ -> $k' s f$
                          | _ -> $f$
                      >>);
                 <:patt< $lid:id$ >>
