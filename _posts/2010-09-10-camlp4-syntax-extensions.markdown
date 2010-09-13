@@ -196,11 +196,15 @@ extension:
 {% endhighlight %}
 
 We put `rec` after `try` (following `micmatch`), which is a little
-weird, but if we put it before we would need to look ahead to
+weird <s>, but if we put it before we would need to look ahead to
 disambiguate `let` from `let try`; once we parse `opt_rec` we are
-committed to one rule or the other. After `in` we parse `sequence`
-rather than `SELF`; this seems like a good choice because there is a
-`with` to end the sequence.
+committed to one rule or the other</s> ; instead we could start the
+rule `"let"; r = opt_rec; "try"`, which has no ambiguity with the
+ordinary `let` rule because the `"let"; opt_rec` prefix is factored
+out; the parser doesn't choose between the rules until it tries to
+parse `try`. After `in` we parse `sequence` rather than `SELF`; this
+seems like a good choice because there is a `with` to end the
+sequence.
 
 Now, to transform the AST, we map over the match cases. The
 `match_case` entry returns a list of cases separated by `Ast.McOr`; we
