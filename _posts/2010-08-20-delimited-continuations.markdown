@@ -67,7 +67,11 @@ continuations in OCaml reminded me of two things:
 
 The paper describing the library,
 [Delimited Control in OCaml, Abstractly and Concretely](http://okmij.org/ftp/continuations/caml-shift.pdf),
-has a pretty good overview of delimited continuations. The core API is small:
+has a pretty good overview of delimited continuations, and section 2 of
+[A Monadic Framework for Delimited Continuations](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.68.9352)
+is helpful too.
+
+The core API is small:
 
 {% highlight ocaml %}
   type 'a prompt
@@ -81,30 +85,70 @@ has a pretty good overview of delimited continuations. The core API is small:
   val push_subcont : ('a,'b) subcont -> (unit -> 'a) -> 'b
 {% endhighlight %}
 
-Paraphrasing the paper: A prompt is like an exception. The call
-`push_prompt p f` is like a `try`/`with` expression, and
-`take_subcont p g` is like `raise`, except that rather than
-pattern-matching the exception, we handle only the exact prompt `p`,
-and instead of running some arbitrary code when we handle it, we run
-`g`.
+I find it easiest to think about these functions as operations on the
+stack. A prompt is an identifier used to mark a point on the stack
+(the stack can be marked more than once with the same prompt). The
+function `new_prompt` makes a new prompt which is not equal to any
+other prompt.
 
-The big difference is that `g` is passed a handle `sk` to the control
-point at which the exception was raised (i.e. `take_subcont` was
-called). We can resume control at that point with `push_subcont sk h`,
-and instead of raising the exception, the result of `h` is returned.
+The call `push_prompt p f` marks the stack with `p` then runs `f`, so
+the stack, growing to the right, looks like
 
-A somewhat lower-level view of things is that `push_prompt p f` marks
-the stack with `p` then runs `f`; `take_subcont p g` unwinds the stack
-back to `p`, then passes the unwound fragment to `g`; and
-`push_subcont sk h` restores the stack fragment `sk` then runs
-`h`. (Based on a pretty cursory reading of the paper it sounds like
-this is how the library is implemented.)
+<pre>
+  ABCDpEFGH
+</pre>
+
+where `ABCD` are stack frames in the continuation of the call to
+`push_prompt`, and `EFGH` are frames created while running `f`. If `f`
+returns normally (that is, without calling `take_subcont`) then its
+return value is returned by `push_prompt`, and we are back to the
+original stack `ABCD`.
+
+If `take_subcont p g` is called while running `f`, the stack fragment
+`EFGH` is packaged up as an `('a,'b) subcont` and passed to `g`. You
+can think of an `('a,'b) subcont` as a function of type `'a -> 'b`,
+where `'a` is the return type of the call to `take_subcont` and `'b`
+is the return type of the call to `push_prompt`. `Take_subcont`
+removes the fragment `pEFGH` from the stack, and there are some new
+frames `IJKL` from running `g`, so we have
+
+<pre>
+  ABCDIJKL
+</pre>
+
+Now `g` can make use of the passed-in `subcont` using
+`push_subcont`. (Thinking of a `subcont` as a function, `push_subcont`
+is just a weird function application operator, which takes the
+argument as a thunk). Then the stack becomes
+
+<pre>
+  ABCDIJKLEFGH
+</pre>
+
+Of course `g` can call the `subcont` as many times as you like.
+
+A common pattern is to re-mark the stack with `push_prompt` before
+calling `push_subcont` (so `take_subcont` may be called again). There
+is an optimized version of this combination called
+`push_delim_subcont`, which produces the stack
+
+<pre>
+  ABCDIJKLpEFGH
+</pre>
+
+The idea that a `subcont` is a kind of function is realized by
+`shift0`, which is like `take_subcont` except that instead of passing
+a `subcont` to `g` it passes an ordinary function. The passed function
+just wraps a call to `push_delim_subcont`. (It is `push_delim_subcont`
+rather than `push_subcont` for historical reasons I think---see the
+Monadic Framework paper for a comparison of various delimited
+continuation primitives.)
 
 <b>Implementing fibers</b>
 
 To implement fibers, we want `start f` to mark the stack, then run
-`f`; and `await t` to unwind the stack, wait for `t` to complete, then
-restore the stack. Here is `start`:
+`f`; and `await t` to unwind the stack back to the mark, wait for `t`
+to complete, then restore the stack. Here is `start`:
 
 {% highlight ocaml %}
   let active_prompt = ref None
@@ -130,14 +174,14 @@ restore the stack. Here is `start`:
 We make a sleeping Lwt thread, and store a new prompt in a global
 (this is OK because we won't yield control to another Lwt thread
 before using it; of course this is not safe with OCaml threads). Then
-we mark the stack with `push_prompt` and run the fiber. The
+we mark the stack with `push_prompt` and run the fiber. (The
 `let r = ... match r with ...` is to avoid calling `Lwt.wakeup{,_exn}`
 in the scope of the `try`; we use `Lwt.state` as a handy type to store
-either a result or an exception. If the fiber completes without
+either a result or an exception.) If the fiber completes without
 calling `await` then all we do is wake up the Lwt thread with the
 returned value or exception.
 
-Here is a first try at `await`:
+Here is `await`:
 
 {% highlight ocaml %}
   let await t =
@@ -150,98 +194,60 @@ Here is a first try at `await`:
     match Lwt.poll t with
       | Some v -> v
       | None ->
-          Delimcc.take_subcont p begin fun sk () ->
-            let ready _ =
-              active_prompt := Some p;
-              Delimcc.push_subcont sk begin fun () ->
-                match Lwt.poll t with
-                  | Some v -> v
-                  | None -> assert false
-              end;
-              Lwt.return () in
-            ignore (Lwt.try_bind (fun () -> t) ready ready)
-          end
-{% endhighlight %}
-
-We first check to be sure that we are in the scope of `start`, and
-that `t` isn't already completed (in which case we can just return its
-result). Then we call `take_subcont` to unwind the stack, and
-`try_bind` so we can restore the stack fragment when `t` completes
-(whether by success or failure). The `ready` function restores the
-global `active_prompt`, in case the fiber calls `await` again, then
-restores the stack with `push_subcont`, and finally returns the value
-(or exception) of `t`. We need `Lwt.return ()` to make the types work
-out, but what happens to the rest of the computation after we call
-`push_subcont`? We are somewhere in `Lwt.restart` at this point and
-need to run other waiters. Hmm...
-
-This version works for the first call to `await`, but if you make a
-second call you get `Failure "No prompt was set"`. It turns out that
-`push_prompt` has another difference from `try`/`with`---it only works
-once. We need to call it again to reset the exception handler:
-
-{% highlight ocaml %}
-          Delimcc.take_subcont p begin fun sk () ->
-            let ready _ =
-              active_prompt := Some p;
-              Delimcc.push_prompt p begin fun () ->
-                Delimcc.push_subcont sk begin fun () ->
-                  match Lwt.poll t with
-                    | Some v -> v
-                    | None -> assert false
-                end
-              end;
-              Lwt.return () in
-            ignore (Lwt.try_bind (fun () -> t) ready ready)
-          end
-{% endhighlight %}
-
-When `t` completes, we mark the stack again, then restore the saved
-stack fragment to continue the fiber. The next time the fiber calls
-`await`, control returns to the point after `push_prompt`, and we
-continue running the waiters of `t`. We have been carrying around the
-continuation of the original call to the fiber (`f ()` in `start`) in
-the saved stack fragments, so when `f` finally returns we wake up the
-Lwt thread we created in `start`. (I'll be honest, I don't 100%
-understand this.)
-
-Rooting around in `delimcc.ml` we find another function,
-`push_delim_subcont`, which is supposed to be an optimized version of
-the `push_prompt`/`push_subcont` pair. And we find `shift0`, which
-looks a lot like the `take_subcont`/`push_delim_subcont` pattern. Can
-we use it?
-
-{% highlight ocaml %}
           Delimcc.shift0 p begin fun k ->
             let ready _ =
               active_prompt := Some p;
-              begin match Lwt.poll t with
-                | Some v -> k v
-                | None -> assert false
-              end;
+              k ();
               Lwt.return () in
             ignore (Lwt.try_bind (fun () -> t) ready ready)
-          end
+          end;
+          match Lwt.poll t with
+            | Some v -> v
+            | None -> assert false
 {% endhighlight %}
 
-It turns out no. This works fine if `t` succeeds, but if it fails, the
-call to `Lwt.poll` raises the exception at the wrong place---we
-haven't yet restored the stack. If `shift0` took a thunk rather than a
-value, we could use it. So here is our final version:
+We first check to be sure that we are in the scope of `start`, and
+that `t` isn't already completed (in which case we just return its
+result). If we actually need to wait for `t`, we call `shift0`, which
+capture the stack fragment back to the `push_prompt` call in `start`
+(this continuation includes the subsequent `match Lwt.poll t` and
+everything after the call to `await`), then `try_bind` so we can
+restore the stack fragment when `t` completes (whether by success or
+failure). When `t` completes, the `ready` function restores the global
+`active_prompt`, in case the fiber calls `await` again, then restores
+the stack by calling `k` (recall that this also re-marks the stack
+with `p`, which is needed if the fiber calls `await` again).
 
-{% highlight ocaml %}
-          Delimcc.take_subcont p begin fun sk () ->
-            let ready _ =
-              active_prompt := Some p;
-              Delimcc.push_delim_subcont sk begin fun () ->
-                match Lwt.poll t with
-                  | Some v -> v
-                  | None -> assert false
-              end;
-              Lwt.return () in
-            ignore (Lwt.try_bind (fun () -> t) ready ready)
-          end
-{% endhighlight %}
+It's pretty difficult to follow what's going on here, so let's try it
+with stacks. After calling `start` we have
+
+<pre>
+  ABCDpEFGH
+</pre>
+
+where `ABCD` is the continuation of `push_prompt` in `start` (just the
+return of `t`) and `EFGH` are frames created by the thunk passed to
+`start`. Now, a call to `await` (on an uncompleted thread) calls
+`shift0`, which packs up `EFGH` as `k` and unwinds the stack to
+`p`. The function passed to `shift0` stores `k` in `ready` but doesn't
+call it, and control returns to `start` (since the stack has been
+unwound).
+
+The program continues normally until `t` completes. Now control is in
+`Lwt.run_waiters` running threads that were waiting on `t`; one of
+them is our `ready` function. When it is called, the stack is
+re-marked and `EFGH` is restored, so we have
+
+<pre>
+  QRSTpEFGH
+</pre>
+
+where `QRST` is wherever we happen to be in the main program, ending
+in `Lwt.run_waiters`. Now, `EFGH` ends with the second call to
+`match Lwt.poll` in `await`, which returns the value of `t` and
+continues the thunk passed to `start`. The stack is now marked with
+`p` inside `Lwt.run_waiters`, so when `await` is called again control
+returns there.
 
 <b>Events vs. threads</b>
 
@@ -333,22 +339,19 @@ the pattern match and `Lwt.wakeup{,_exn}`.
         | Some p -> p in
     active_prompt := None;
   
-    Delimcc.take_subcont p begin fun sk () ->
-      Froc.notify_result_b t begin fun r ->
+    Delimcc.shift0 p begin fun k ->
+      Froc.notify_result_b t begin fun _ ->
         active_prompt := Some p;
-        Delimcc.push_delim_subcont sk begin fun () ->
-          match r with
-            | Froc.Value v -> v
-            | Froc.Fail e -> raise e
-        end
+        k ()
       end
-    end
+    end;
+    Froc.sample t
 {% endhighlight %}
 
 And this is essentially the same code as `await`. A `Froc.behavior`
 always has a value, so we don't poll it as we did with `Lwt.t`, but go
-straight to `take_subcont`. We have `Froc.try_bind` but it's a little
-more compact to use use `notify_result_b`, which passes a `result`.
+straight to `shift0`. We have `Froc.try_bind` but it's a little more
+compact to use use `notify_result_b`, which passes a `result`.
 
 <b>Monadic reflection</b>
 
@@ -363,13 +366,22 @@ A little googling turns up Andrzej Filinski's paper
 [Representing Monads](http://www.diku.dk/hjemmesider/ansatte/andrzej/papers/RM-abstract.html),
 which reaches the same conclusion, with a lot more rigor. In that work
 `start`/`direct` are called `reify`, and `await`/`read` are called
-`reflect`. `Reflect` seems to be close to the implementations above,
-but in `reify` the paper uses the monadic `bind` and `return` rather
-than creating an uninitialized monadic value and later setting it. The
-delimited continuation operators are a little different; I'm not sure
-how to achieve the same thing here.
+`reflect`. `Reflect` is close to the implementations above, but in
+`reify` the paper marks the stack inside a function passed to `bind`
+rather than creating an uninitialized monadic value and later setting
+it.
+
+This makes sense---inside `bind` an uninitialized monadic value is
+created, then set from the result of the function passed to `bind`. So
+we are partially duplicating `bind` in the code above. If we mark the
+stack in the right place we should be able to use `bind` directly. It
+is hard to see how to make the details work out, however, since
+`Lwt.bind` and `Froc.bind` each have some cases where uninitialized
+values are not created.
 
 (You can find the complete code for Lwt fibers
 [here](http://github.com/jaked/lwt-equeue/tree/master/src/lwt-fiber) and
 direct-style `froc`
 [here](http://github.com/jaked/froc/tree/master/src/froc-direct).)
+
+(revised 10/22)
