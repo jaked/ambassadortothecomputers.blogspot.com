@@ -295,7 +295,7 @@ these wrappers to spring into existence when we need them.
 
 Now we can rewrite the solution in terms of the `Logic` trait:
 {% highlight scala %}
-class Bridge1(Logic: Logic) {
+class Bridge(Logic: Logic) {
   import Logic._
 {% endhighlight %}
 
@@ -433,7 +433,7 @@ trait Logic[T[_]] { L =>
 {% endhighlight %}
 Neither alternative provides the expressivity of OCaml modules: with
 abstract types, consumers of `Logic` cannot return values of `T[A]`
-(we will see this below); with a type parameter, they can, but the
+(as we saw above); with a type parameter, they can, but the
 type is no longer abstract.
 
 In OCaml we would write
