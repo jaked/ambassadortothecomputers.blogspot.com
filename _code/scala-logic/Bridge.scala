@@ -1,4 +1,4 @@
-class Bridge1(Logic: Logic) {
+class Bridge(Logic: Logic) {
   import Logic._
 
   object Person extends Enumeration {

@@ -1,12 +1,16 @@
 ---
-layout: blogspot
+layout: post
 title: Logic programming in Scala
 ---
 
-In my new job I've been writing some Scala. I am pretty much a total
-Scala noob, so I thought I would learn something by translating some
-functional code into Scala. Of course, a good translation should use
-the local idiom, so I've tried to do that.
+I got a new job where I am hacking some Scala. I thought I would learn
+something by translating some functional code into Scala, and a friend
+had recently pointed me to Kiselyov et al.'s
+[Backtracking, Interleaving, and Terminating Monad Transformers](http://okmij.org/ftp/Computation/LogicT.pdf), which
+provides a foundation for Prolog-style logic programming. Of course, a
+good translation should use the local idiom. So in this post (and the
+next) I want to explore an embedded domain-specific language for logic
+programming in Scala.
 
 <b>A search problem</b>
 
@@ -26,8 +30,9 @@ the answer.
 The basic shape of the solution is to represent the state of the world
 (where are the people, where is the flashlight, how much battery is
 left), write a function to compute from any particular state the set
-of possible next states, then search for a solution in the tree formed
-by applying the next state function transitively to the start state.
+of possible next states, then search for an answer (a path from the
+start state to the final state) in the tree formed by applying the
+next state function transitively to the start state.
 ([Here is a paper](http://web.engr.oregonstate.edu/~erwig/papers/Zurg_JFP04.pdf)
 describing solutions in Prolog and Haskell.)
 
@@ -114,10 +119,10 @@ Person)]]`) or else you get a type clash between `List[Nothing]` and
 {% endhighlight %}
 
 Here we compute the set of successor states for a state. We make a
-simplification: when the flashlight is on the left (the side where
-everyone begins) we move two people from the left to the right; when
-it is on the right we move only one. I don't have a proof that a
-solution must take this form, but I believe it, and it makes the code
+heuristic simplification: when the flashlight is on the left (the side
+where everyone begins) we move two people from the left to the right;
+when it is on the right we move only one. I don't have a proof that an
+answer must take this form, but I believe it, and it makes the code
 shorter.
 
 So when the light is on the left we fold over all the pairs of people
@@ -149,7 +154,7 @@ states of the head of the path, augment the path with each state in
 turn, recursively find the tree rooted at each augmented path, then
 append them all (including the input path).
 
-Then to find a solution, we generate the state tree rooted at the path
+Then to find an answer, we generate the state tree rooted at the path
 consisting only of the start state (everybody and the flashlight on
 the left, 60 minutes remaining on the light), then filter out the
 paths which end in a final state (everybody on the right).
@@ -202,9 +207,6 @@ section 6.19. Roughly speaking, `<-` becomes `flatMap`, `if` becomes
     list.flatMap(p1 =>
       list.filter(p2 => p1 < p2).map(p2 => (p1, p2)))
 {% endhighlight %}
-
-In the next section we'll implement the for-comprehension methods in a
-different way.
 
 <b>The logic monad</b>
 
@@ -266,7 +268,8 @@ choice among the remaining alternatives.
 
 As a convenience, `or(as: List[A])` means a choice among the elements
 of `as`. And `run` returns a list of the first `n` alternatives in a
-choice, picking them off one by one with `split`.
+choice, picking them off one by one with `split`; this is how we get
+answers out of a `T[A]`.
 
 {% highlight scala %}
   case class Syntax[A](t: T[A]) {
@@ -283,23 +286,22 @@ choice, picking them off one by one with `split`.
 {% endhighlight %}
 
 Here we hook into the for-comprehension notation, by wrapping values
-of type `T[A]` in an object with the methods we need (and `|` as a bit
-of syntactic sugar), which methods just delegate to the functions
-defined above. We arrange, with an implicit conversion, for these
-wrappers to spring into existence when we need them.
+of type `T[A]` in an object with the methods we need (and `|` as an
+additional bit of syntactic sugar), which methods just delegate to the
+functions defined above. We arrange with an implicit conversion for
+these wrappers to spring into existence when we need them.
 
 <b>The bridge puzzle with the logic monad</b>
 
 Now we can rewrite the solution in terms of the `Logic` trait:
-
 {% highlight scala %}
 class Bridge1(Logic: Logic) {
   import Logic._
 {% endhighlight %}
 
 We pass an implementation of the logic monad in, then open it so the
-implicit conversion is available (we also use `T[A]` and the `Logic`
-functions without qualification).
+implicit conversion is available (we can also use `T[A]` and the
+`Logic` functions without qualification).
 
 The `Person`, `times`, and `State` definitions are as before.
 
@@ -330,7 +332,9 @@ to the other explicitly.
     } else { // ...
 {% endhighlight %}
 
-This is much the same as before
+This is pretty much as before, except with for-comprehensions instead
+of `foldLeft` and explicit consing. (You can easily figure out the
+branch for the flashlight on the right.)
 
 {% highlight scala %}
   private def tree(path: List[State]): T[List[State]] =
@@ -350,9 +354,16 @@ This is much the same as before
 }
 {% endhighlight %}
 
+In `tree` we use `|` to adjoin the input path (previously we gave it
+in the initial value of `foldLeft`). In `search` we need to actually
+run the `Logic.T[A]` value rather than returning it, because it's an
+abstract type and can't escape the module (see the Postscript for an
+alternative); this is why the other methods must be `private`.
+
 <b>Implementing the logic monad with lists</b>
 
 We can recover the original solution by implementing `Logic` with lists:
+
 {% highlight scala %}
 object LogicList extends Logic {
   type T[A] = List[A]
@@ -370,17 +381,22 @@ object LogicList extends Logic {
     }
 }
 {% endhighlight %}
-A choice among alternatives is just a `List` of the alternatives, and
+
+A choice among alternatives is just a `List` of the alternatives, so
 the semantics we sketched above are realized in a very direct way.
 
 The downside to the `List` implementation is that we compute all the
 alternatives, even if we only care about one of them. (In the bridge
-problem any path to the final state is enough, but our program
-computes all such paths.) We might even want to solve problems with an
-infinite number of solutions.
+problem any path to the final state is a satisfactory answer, but our
+program computes all such paths, even if we pass an argument to
+`search` requesting only one answer.) We might even want to solve
+problems with an infinite number of solutions.
 
-Next time we'll consider another implementation of `Logic` which
-repairs this downside.
+Next time we'll repair this downside by implementing the backtracking
+monad from the paper by Kiselyov et al.
+
+See the complete code
+[here](https://github.com/jaked/ambassadortothecomputers.blogspot.com/tree/master/_code/scala-logic).
 
 <b>Postscript: modules in Scala</b>
 
@@ -405,7 +421,7 @@ trait Logic {
   type T[A] <: Monadic[T, A]
   // no Syntax class needed
 {% endhighlight %}
-This works too but the type system hackery seems a bit ugly, and it
+This works too but the type system hackery is a bit ugly, and it
 constrains implementations of `Logic` more than is necessary.
 
 Another design choice is whether `T[A]` is an abstract type (as I have
