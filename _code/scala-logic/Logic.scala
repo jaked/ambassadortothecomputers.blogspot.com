@@ -101,3 +101,47 @@ object LogicSFK extends Logic {
     t(sk, None)
   }
 }
+
+case object Fail extends Exception
+case object Finish extends Exception
+
+object LogicSKE extends Logic {
+  type T[A] = (A => Unit) => Unit
+
+  def fail[A] = { sk => throw Fail }
+
+  def unit[A](a: A) = { sk => sk(a) }
+
+  def or[A](t1: T[A], t2: => T[A]) =
+    { sk =>
+      try { t1(sk) }
+      catch { case Fail => t2(sk) }
+    }
+
+  def bind[A,B](t: T[A], f: A => T[B]) =
+    { sk => t(a => f(a)(sk)) }
+
+  def apply[A,B](t: T[A], f: A => B) =
+    { sk => t(a => sk(f(a))) }
+
+  def filter[A](t: T[A], p: A => Boolean) =
+    { sk =>
+      t(a => if (p(a)) sk(a) else throw Fail)
+    }
+
+  def split[A](t: T[A]) = throw new Exception("unimplemented")
+
+  override def run[A](t: T[A], n: Int): List[A] = {
+    if (n <= 0) return Nil
+    val lb = new scala.collection.mutable.ListBuffer[A]
+    def sk(a: A) = {
+      lb += a
+      throw (if (lb.size < n) Fail else Finish)
+    }
+    try {
+      t(sk)
+      throw Finish // for the typechecker, not reached
+    }
+    catch { case Fail | Finish => lb.result }
+  }
+}
