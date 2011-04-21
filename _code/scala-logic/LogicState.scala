@@ -9,6 +9,9 @@ trait LogicState { L =>
   def filter[S,A](t: T[S,A], p: A => Boolean): T[S,A]
   def split[S,A](s: S, t: T[S,A]): Option[(S,A,T[S,A])]
 
+  def get[S]: T[S,S]
+  def set[S](s: S): T[S, Unit]
+
   def or[S,A](as: List[A]): T[S,A] =
     as.foldRight(fail[S,A])((a, t) => or(unit(a), t))
 
@@ -26,6 +29,7 @@ trait LogicState { L =>
     def withFilter(p: A => Boolean): T[S,A] = L.filter(t, p)
 
     def |(t2: => T[S,A]): T[S,A] = L.or(t, t2)
+    def &[B](t2: => T[S,B]): T[S,B] = L.bind(t, { _: A => t2 })
   }
 
   implicit def syntax[S,A](t: T[S,A]) = Syntax(t)
@@ -88,6 +92,16 @@ object LogicStateSFK extends LogicState {
       { (s, a, fk) => Some(s, a, byNameUnit(fk).flatMap(unsplit)) }
     t(s, sk, None)
   }
+
+  def get[S]: T[S,S] =
+    new T[S,S] {
+      def apply[R](s: S, sk: SK[S,S,R], fk: => R) = sk(s, s, fk)
+    }
+
+  def set[S](s: S): T[S,Unit] =
+    new T[S,Unit] {
+      def apply[R](_s: S, sk: SK[S,Unit,R], fk: => R) = sk(s, (), fk)
+    }
 }
 
 object LogicStateSKE extends LogicState {
@@ -129,4 +143,8 @@ object LogicStateSKE extends LogicState {
     }
     catch { case Fail | Finish => lb.result }
   }
+
+  def get[S] = { (s, sk) => sk(s, s) }
+
+  def set[S](s: S) = { (_s, sk) => sk(s, ()) }
 }
