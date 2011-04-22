@@ -15,12 +15,15 @@ trait LogicState { L =>
   def or[S,A](as: List[A]): T[S,A] =
     as.foldRight(fail[S,A])((a, t) => or(unit(a), t))
 
-  def run[S,A](s0: S, t: T[S,A], n: Int): List[(S,A)] =
-    if (n <= 0) Nil else
-      split(s0, t) match {
-        case None => Nil
-        case Some((s, a, t)) => (s, a) :: run(s0, t, n - 1)
-      }
+  def run[S,A](s0: S, t: T[S,A], n: Int): List[(S,A)] = {
+    def runAcc(t: T[S,A], n: Int, acc: List[(S,A)]): List[(S,A)] =
+      if (n <= 0) acc.reverse else
+        split(s0, t) match {
+          case None => Nil
+          case Some((s, a, t)) => runAcc(t, n - 1, (s, a) :: acc)
+        }
+    runAcc(t, n, Nil)
+  }
 
   case class Syntax[S,A](t: T[S,A]) {
     def map[B](f: A => B): T[S,B] = L.apply(t, f)
@@ -36,71 +39,67 @@ trait LogicState { L =>
 }
 
 object LogicStateSFK extends LogicState {
-  // type FK[R] = => R
-  type SK[S,A,R] = (S, A, => R) => R
+  type FK[R] = () => R
+  type SK[S,A,R] = (S, A, FK[R]) => R
 
-  trait T[S,A] { def apply[R](s: S, sk: SK[S,A,R], fk: => R): R }
+  trait T[S,A] { def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]): R }
 
   def fail[S,A] =
     new T[S,A] {
-      def apply[R](s: S, sk: SK[S,A,R], fk: => R) = fk
+      def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) = fk()
     }
 
   def unit[S,A](a: A) =
     new T[S,A] {
-      def apply[R](s: S, sk: SK[S,A,R], fk: => R) = sk(s, a, fk)
+      def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) = sk(s, a, fk)
     }
 
   def or[S,A](t1: T[S,A], t2: => T[S,A]) =
     new T[S,A] {
-      def apply[R](s: S, sk: SK[S,A,R], fk: => R) = t1(s, sk, t2(s, sk, fk))
+      def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) = t1(s, sk, { () => t2(s, sk, fk) })
     }
 
   def bind[S,A,B](t: T[S,A], f: A => T[S,B]) =
     new T[S,B] {
-      def apply[R](s: S, sk: SK[S,B,R], fk: => R) =
+      def apply[R](s: S, sk: SK[S,B,R], fk: FK[R]) =
         t(s, ({ (s, a, fk) => f(a)(s, sk, fk) }: SK[S,A,R]), fk)
     }
 
   def apply[S,A,B](t: T[S,A], f: A => B) =
     new T[S,B] {
-      def apply[R](s: S, sk: SK[S,B,R], fk: => R) =
+      def apply[R](s: S, sk: SK[S,B,R], fk: FK[R]) =
         t(s, ({ (s, a, fk) => sk(s, f(a), fk) }: SK[S,A,R]), fk)
     }
 
   def filter[S,A](t: T[S,A], p: A => Boolean) =
     new T[S,A] {
-      def apply[R](s: S, sk: SK[S,A,R], fk: => R) =
-        t(s, ({ (s, a, fk) => if (p(a)) sk(s, a, fk) else fk }: SK[S,A,R]), fk)
+      def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) =
+        t(s, ({ (s, a, fk) => if (p(a)) sk(s, a, fk) else fk() }: SK[S,A,R]), fk)
     }
 
   def split[S,A](s: S, t: T[S,A]) = {
     def stateUnit[S,A](s: S, a: A): T[S,A] =
       new T[S,A] {
-        def apply[R](s: S, sk: SK[S,A,R], fk: => R) = sk(s, a, fk)
+        def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) = sk(s, a, fk)
       }
-    def unsplit(r: Option[(S,A,T[S,A])]): T[S,A] =
-      r match {
+    def unsplit(r: () => Option[(S,A,T[S,A])]): T[S,A] =
+      r() match {
         case None => fail
         case Some((s, a, t)) => or(stateUnit(s, a), t)
       }
-    def byNameUnit[S,A](a: => A): T[S,A] =
-      new T[S,A] {
-        def apply[R](s: S, sk: SK[S,A,R], fk: => R) = sk(s, a, fk)
-      }
     def sk : SK[S,A,Option[(S,A,T[S,A])]] =
-      { (s, a, fk) => Some(s, a, byNameUnit(fk).flatMap(unsplit)) }
-    t(s, sk, None)
+      { (s, a, fk) => Some((s, a, unit(fk).flatMap(unsplit))) }
+    t(s, sk, { () => None })
   }
 
   def get[S]: T[S,S] =
     new T[S,S] {
-      def apply[R](s: S, sk: SK[S,S,R], fk: => R) = sk(s, s, fk)
+      def apply[R](s: S, sk: SK[S,S,R], fk: FK[R]) = sk(s, s, fk)
     }
 
   def set[S](s: S): T[S,Unit] =
     new T[S,Unit] {
-      def apply[R](_s: S, sk: SK[S,Unit,R], fk: => R) = sk(s, (), fk)
+      def apply[R](_s: S, sk: SK[S,Unit,R], fk: FK[R]) = sk(s, (), fk)
     }
 }
 
@@ -139,7 +138,7 @@ object LogicStateSKE extends LogicState {
     }
     try {
       t(s, sk)
-      throw Finish // for the typechecker, not reached
+      throw new Exception("not reached")
     }
     catch { case Fail | Finish => lb.result }
   }

@@ -219,31 +219,111 @@ choice of alternatives no results are memoized; to compute each
 successive number in `nat` all the previous ones must be
 recomputed. So the running time of `run(nat, N)` is O(N<sup>2</sup>).
 
+<b>Tail recursion and heap space</b>
+
+The previous implementation isn't very efficient in Scala. One problem
+is its use of continuation-passing style: because Scala doesn't
+implement tail-call elimination, every call to a success or failure
+continuation adds a frame to the stack, even though all we ever do
+with the result of these calls is return it (that is, the calls are
+always in tail position).
+
+Surprisingly, however, we run out of memory before we run out of
+stack:
+
 {% highlight scala %}
-scala> run(nat, 2000).length
+scala> run(nat, 2000)
 Java.lang.OutOfMemoryError: Java heap space
 	...
 {% endhighlight %}
 
-<b>Backtracking with exceptions</b>
+A little heap profiling shows that we're using quadratic space as well
+as quadratic time. It turns out that our implementation of `Logic.run`
+(from the previous post) has a space leak. The call to `run` is not
+tail-recursive (we cons `a` onto the returned list), so the stack
+frame hangs around, and although `t` is dead after `split(t)`, there's
+still a reference to it on the stack.
+
+We can rewrite `run` with an accumulator to be tail-recursive:
 
 {% highlight scala %}
-case object Fail extends Exception
-case object Finish extends Exception
+  def run[A](t: T[A], n: Int): List[A] = {
+    def runAcc(t: T[A], n: Int, acc: List[A]): List[A] =
+      if (n <= 0) acc.reverse else
+        split(t) match {
+          case None => Nil
+          case Some((a, t)) => runAcc(t, n - 1, a :: acc)
+        }
+    runAcc(t, n, Nil)
+  }
+{% endhighlight %}
 
+Now `scalac` compiles `runAcc` as a loop, so there are no stack frames
+holding on to dead values of `t`, and we get the expected:
+
+{% highlight scala %}
+scala> run(nat, 9000)
+java.lang.StackOverflowError
+	...
+{% endhighlight %}
+
+So Scala's local tail-call optimization is useful to reduce not just
+stack space, but also heap space. (We could of course write this as an
+ordinary loop instead.)
+
+<b>Backtracking with exceptions</b>
+
+The Kiselyov paper offers another implementation of the logic monad in
+terms of delimited continuations. This isn't quite helpful; while
+Scala implements delimited continuations, it does so by converting
+code to continuation-passing style (see Rompf et al.'s
+[Implementing First-Class Polymorphic Delimited Continuations by a Type-Directed Selective CPS-Transform](http://lamp.epfl.ch/~rompf/continuations-icfp09.pdf).
+So they suffer the same problem with un-eliminated tail calls.
+
+Still the delimited continuation implementation points toward another
+implementation using exceptions instead of failure continuations. The
+`prompt` and `abort` delimited control operators are similar to
+`catch` and `throw`---the first marks a point on the stack, the second
+unwinds the stack to that point. However, exceptions don't provide
+`shift` (which packages up a stack fragment as a function) so we'll
+need to hack around it.
+
+{% highlight scala %}
 object LogicSKE extends Logic {
-  type T[A] = (A => Unit) => Unit
+  case object Fail extends Exception
 
+  type T[A] = (A => Unit) => Unit
+{% endhighlight %}
+
+The type representing a choice among alternatives is now a function
+taking just a success continuation; failure is represented by throwing
+a `Fail` exception. We won't need to return values from the
+continuations (see `run` below) so we don't need to encode a rank-2
+type.
+
+{% highlight scala %}
   def fail[A] = { sk => throw Fail }
 
   def unit[A](a: A) = { sk => sk(a) }
+{% endhighlight %}
 
+To fail we just throw `Fail`; to succeed with one alternative we just
+call the success continuation on the value.
+
+{% highlight scala %}
   def or[A](t1: T[A], t2: => T[A]) =
     { sk =>
       try { t1(sk) }
       catch { case Fail => t2(sk) }
     }
+{% endhighlight %}
 
+We pass the success continuation first to `t1`; when `t2` runs out of
+alternatives and throws `Fail`, we catch it and pass the success
+continuation to `t2`. So The success continuation is called on each
+alternative in both `t1` and `t2`.
+
+{% highlight scala %}
   def bind[A,B](t: T[A], f: A => T[B]) =
     { sk => t(a => f(a)(sk)) }
 
@@ -254,8 +334,17 @@ object LogicSKE extends Logic {
     { sk =>
       t(a => if (p(a)) sk(a) else throw Fail)
     }
+{% endhighlight %}
 
+`Bind` and `apply` are much the same as before, but without the
+failure continuations. `Filter` is also much the same, except that we
+throw `Fail` instead of calling a failure continuation when the
+predicate is not satisfied.
+
+{% highlight scala %}
   def split[A](t: T[A]) = throw new Exception("unimplemented")
+
+  case object Finish extends Exception
 
   override def run[A](t: T[A], n: Int): List[A] = {
     if (n <= 0) return Nil
@@ -266,12 +355,35 @@ object LogicSKE extends Logic {
     }
     try {
       t(sk)
-      throw Finish // for the typechecker, not reached
+      throw new Exception("not reached")
     }
     catch { case Fail | Finish => lb.result }
   }
 }
 {% endhighlight %}
+
+Here's where things get hacky. It's difficult to implement `split`
+using exceptions (see `LogicSKE2` in the
+[complete code](https://github.com/jaked/ambassadortothecomputers.blogspot.com/tree/master/_code/scala-logic)
+for an attempt---it works but is very slow). Instead we implement
+`run` directly: every time the success continuation is called we
+append the result to a mutable list. When we have enough results we
+throw `Finish` to stop generating them.
+
+(In the paper, `split` is used to implement search strategies other
+than the depth-first strategy we use here; if you want to play with
+those you can use `LogicSFK`.)
+
+Now we make better use of the stack:
+
+{% highlight scala %}
+scala> run(nat, 15000)
+res0: List[Int] = List(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, ...
+{% endhighlight %}
+
+(The size at which `run` blows up varies a lot between runs, even in
+the same instance of the Scala top-level. I guess this has to do with
+optimiziations performed by the JVM's JIT compiler.)
 
 <b>State</b>
 
@@ -333,5 +445,3 @@ object LogicStateSKE extends LogicState {
   }
 }
 {% endhighlight %}
-
-<b>Logic programming</b>
