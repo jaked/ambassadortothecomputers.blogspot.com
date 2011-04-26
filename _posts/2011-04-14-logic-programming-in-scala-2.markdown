@@ -219,7 +219,7 @@ choice of alternatives no results are memoized; to compute each
 successive number in `nat` all the previous ones must be
 recomputed. So the running time of `run(nat, N)` is O(N<sup>2</sup>).
 
-<b>Tail recursion and heap space</b>
+<b>Tail recursion and defunctionalization</b>
 
 The previous implementation isn't very efficient in Scala. One problem
 is its use of continuation-passing style: because Scala doesn't
@@ -251,7 +251,7 @@ We can rewrite `run` with an accumulator to be tail-recursive:
     def runAcc(t: T[A], n: Int, acc: List[A]): List[A] =
       if (n <= 0) acc.reverse else
         split(t) match {
-          case None => Nil
+          case None => acc
           case Some((a, t)) => runAcc(t, n - 1, a :: acc)
         }
     runAcc(t, n, Nil)
@@ -267,123 +267,157 @@ java.lang.StackOverflowError
 	...
 {% endhighlight %}
 
-So Scala's local tail-call optimization is useful to reduce not just
-stack space, but also heap space. (We could of course write this as an
-ordinary loop instead.)
-
-<b>Backtracking with exceptions</b>
-
-The Kiselyov paper offers another implementation of the logic monad in
-terms of delimited continuations. This isn't quite helpful; while
-Scala implements delimited continuations, it does so by converting
-code to continuation-passing style (see Rompf et al.'s
-[Implementing First-Class Polymorphic Delimited Continuations by a Type-Directed Selective CPS-Transform](http://lamp.epfl.ch/~rompf/continuations-icfp09.pdf).
-So they suffer the same problem with un-eliminated tail calls.
-
-Still the delimited continuation implementation points toward another
-implementation using exceptions instead of failure continuations. The
-`prompt` and `abort` delimited control operators are similar to
-`catch` and `throw`---the first marks a point on the stack, the second
-unwinds the stack to that point. However, exceptions don't provide
-`shift` (which packages up a stack fragment as a function) so we'll
-need to hack around it.
-
 {% highlight scala %}
-object LogicSKE extends Logic {
-  case object Fail extends Exception
+object LogicSFKDefunc extends Logic {
+  sealed trait T[A]
+  case class Fail[A]() extends T[A]
+  case class Unit[A](a: A) extends T[A]
+  case class Or[A](t1: T[A], t2: () => T[A]) extends T[A]
+  case class Bind[A,B](t: T[A], f: A => T[B]) extends T[B]
+  case class Apply[A,B](t: T[A], f: A => B) extends T[B]
+  case class Filter[A](t: T[A], p: A => Boolean) extends T[A]
 
-  type T[A] = (A => Unit) => Unit
-{% endhighlight %}
+  sealed trait FK[R]
+  case class FKOr[A,R](t: () => T[A], sk: SK[A,R], fk: FK[R]) extends FK[R]
+  case class FKSplit[R](r: R) extends FK[R]
 
-The type representing a choice among alternatives is now a function
-taking just a success continuation; failure is represented by throwing
-a `Fail` exception. We won't need to return values from the
-continuations (see `run` below) so we don't need to encode a rank-2
-type.
+  sealed trait SK[A,R]
+  case class SKBind[A,B,R](f: A => T[B], sk: SK[B,R]) extends SK[A,R]
+  case class SKApply[A,B,R](f: A => B, sk: SK[B,R]) extends SK[A,R]
+  case class SKFilter[A,R](p: A => Boolean, sk: SK[A,R]) extends SK[A,R]
+  case class SKSplit[A,R](r: (A, FK[R]) => R) extends SK[A,R]
 
-{% highlight scala %}
-  def fail[A] = { sk => throw Fail }
+  def fail[A] = Fail()
+  def unit[A](a: A) = Unit(a)
+  def or[A](t1: T[A], t2: => T[A]) = Or(t1, { () => t2 })
+  def bind[A,B](t: T[A], f: A => T[B]) = Bind(t, f)
+  def apply[A,B](t: T[A], f: A => B) = Apply(t, f)
+  def filter[A](t: T[A], p: A => Boolean) = Filter(t, p)
 
-  def unit[A](a: A) = { sk => sk(a) }
-{% endhighlight %}
+  def split[A](t: T[A]) = {
+    def unsplit[A](fk: FK[Option[(A, T[A])]]): T[A] =
+      applyFK(fk) match {
+        case None => fail
+        case Some((a, t)) => or(unit(a), t)
+      }
 
-To fail we just throw `Fail`; to succeed with one alternative we just
-call the success continuation on the value.
+    def applyT[A,R](t: T[A], sk: SK[A,R], fk: FK[R]): R =
+      t match {
+        case Fail() => applyFK(fk)
+        case Unit(a) => applySK(sk, a, fk)
+        case Or(t1, t2) => applyT(t1, sk, FKOr(t2, sk, fk))
+        case Bind(t, f) => applyT(t, SKBind(f, sk), fk)
+        case Apply(t, f) => applyT(t, SKApply(f, sk), fk)
+        case Filter(t, p) => applyT(t, SKFilter(p, sk), fk)
+      }
 
-{% highlight scala %}
-  def or[A](t1: T[A], t2: => T[A]) =
-    { sk =>
-      try { t1(sk) }
-      catch { case Fail => t2(sk) }
-    }
-{% endhighlight %}
+    def applyFK[R](fk: FK[R]): R =
+      fk match {
+        case FKOr(t, sk, fk) => applyT(t(), sk, fk)
+        case FKSplit(r) => r
+      }
 
-We pass the success continuation first to `t1`; when `t2` runs out of
-alternatives and throws `Fail`, we catch it and pass the success
-continuation to `t2`. So The success continuation is called on each
-alternative in both `t1` and `t2`.
+    def applySK[A,R](sk: SK[A,R], a: A, fk: FK[R]): R =
+      sk match {
+        case SKBind(f, sk) => applyT(f(a), sk, fk)
+        case SKApply(f, sk) => applySK(sk, f(a), fk)
+        case SKFilter(p, sk) => if (p(a)) applySK(sk, a, fk) else applyFK(fk)
+        case SKSplit(r) => r(a, fk)
+      }
 
-{% highlight scala %}
-  def bind[A,B](t: T[A], f: A => T[B]) =
-    { sk => t(a => f(a)(sk)) }
-
-  def apply[A,B](t: T[A], f: A => B) =
-    { sk => t(a => sk(f(a))) }
-
-  def filter[A](t: T[A], p: A => Boolean) =
-    { sk =>
-      t(a => if (p(a)) sk(a) else throw Fail)
-    }
-{% endhighlight %}
-
-`Bind` and `apply` are much the same as before, but without the
-failure continuations. `Filter` is also much the same, except that we
-throw `Fail` instead of calling a failure continuation when the
-predicate is not satisfied.
-
-{% highlight scala %}
-  def split[A](t: T[A]) = throw new Exception("unimplemented")
-
-  case object Finish extends Exception
-
-  override def run[A](t: T[A], n: Int): List[A] = {
-    if (n <= 0) return Nil
-    val lb = new scala.collection.mutable.ListBuffer[A]
-    def sk(a: A) = {
-      lb += a
-      throw (if (lb.size < n) Fail else Finish)
-    }
-    try {
-      t(sk)
-      throw new Exception("not reached")
-    }
-    catch { case Fail | Finish => lb.result }
+    applyT[A,Option[(A,T[A])]](
+      t,
+      SKSplit((a, fk) => Some((a, bind(unit(fk), unsplit)))),
+      FKSplit(None))
   }
 }
 {% endhighlight %}
 
-Here's where things get hacky. It's difficult to implement `split`
-using exceptions (see `LogicSKE2` in the
-[complete code](https://github.com/jaked/ambassadortothecomputers.blogspot.com/tree/master/_code/scala-logic)
-for an attempt---it works but is very slow). Instead we implement
-`run` directly: every time the success continuation is called we
-append the result to a mutable list. When we have enough results we
-throw `Finish` to stop generating them.
-
-(In the paper, `split` is used to implement search strategies other
-than the depth-first strategy we use here; if you want to play with
-those you can use `LogicSFK`.)
-
-Now we make better use of the stack:
-
 {% highlight scala %}
-scala> run(nat, 15000)
-res0: List[Int] = List(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, ...
-{% endhighlight %}
+object LogicSFKDefuncTailrec extends Logic {
+  sealed trait T[A]
+  case class Fail[A]() extends T[A]
+  case class Unit[A](a: A) extends T[A]
+  case class Or[A](t1: T[A], t2: () => T[A]) extends T[A]
+  case class Bind[A,B](t: T[A], f: A => T[B]) extends T[B]
+  case class Apply[A,B](t: T[A], f: A => B) extends T[B]
+  case class Filter[A](t: T[A], p: A => Boolean) extends T[A]
+  case class Unsplit[A](fk: FK) extends T[A]
 
-(The size at which `run` blows up varies a lot between runs, even in
-the same instance of the Scala top-level. I guess this has to do with
-optimiziations performed by the JVM's JIT compiler.)
+  type R = Option[(Any,T[Any])]
+
+  sealed trait FK
+  case class FKOr(t: () => T[Any], sk: SK, fk: FK) extends FK
+  case class FKSplit(r: R) extends FK
+
+  sealed trait SK
+  case class SKBind(f: Any => T[Any], sk: SK) extends SK
+  case class SKApply(f: Any => Any, sk: SK) extends SK
+  case class SKFilter(p: Any => Boolean, sk: SK) extends SK
+  case class SKSplit(r: (Any, FK) => R) extends SK
+
+  sealed trait K
+  case object KReturn extends K
+  case class KUnsplit(sk: SK, fk: FK, k: K) extends K
+
+  def fail[A] = Fail()
+  def unit[A](a: A) = Unit(a)
+  def or[A](t1: T[A], t2: => T[A]) = Or(t1, { () => t2 })
+  def bind[A,B](t: T[A], f: A => T[B]) = Bind(t, f)
+  def apply[A,B](t: T[A], f: A => B) = Apply(t, f)
+  def filter[A](t: T[A], p: A => Boolean) = Filter(t, p)
+
+  def split[A](t2: T[A]): Option[(A,T[A])] = {
+    var app = 1
+    var t = t2.asInstanceOf[T[Any]]
+    var a: Any = null
+    var r: R = null
+    var sk: SK = SKSplit((a, fk) => Some((a, Unsplit(fk))))
+    var fk: FK = FKSplit(None)
+    var k: K = KReturn
+
+    while (true) {
+      (app: @annotation.switch) match {
+        case 0 => // applyK
+          k match {
+            case KReturn => return r.asInstanceOf[Option[(A,T[A])]]
+            case KUnsplit(sk2, fk2, k2) =>
+              r match {
+                case None => { app = 2; fk = fk2; k = k2 }
+                case Some((a2, t2)) => { app = 1; t = or(unit(a2), t2); sk = sk2; fk = fk2; k = k2 }
+              }
+          }
+
+        case 1 => // applyT
+          t match {
+            case Fail() => app = 2
+            case Unit(a2) => { a = a2; app = 3 }
+            case Or(t1, t2) => { t = t1; fk = FKOr(t2, sk, fk) }
+            case Bind(t2, f) => { t = t2; sk = SKBind(f, sk) }
+            case Apply(t2, f) => { t = t2; sk = SKApply(f, sk) }
+            case Filter(t2, p) => { t = t2; sk = SKFilter(p, sk) }
+            case Unsplit(fk2) => { app = 2; k = KUnsplit(sk, fk, k); fk = fk2 }
+          }
+
+        case 2 => // applyFK
+          fk match {
+            case FKOr(t2, sk2, fk2) => { app = 1; t = t2(); sk = sk2; fk = fk2 }
+            case FKSplit(r2) => { app = 0; r = r2 }
+          }
+
+        case 3 => // applySK
+          sk match {
+            case SKBind(f, sk2) => { app = 1; t = f(a); sk = sk2 }
+            case SKApply(f, sk2) => { sk = sk2; a = f(a) }
+            case SKFilter(p, sk2) => if (p(a)) sk = sk2 else app = 2
+            case SKSplit(rf) => { app = 0; r = rf(a, fk) }
+          }
+      }
+    }
+    throw new Exception("not reached")
+  }
+}
+{% endhighlight %}
 
 <b>State</b>
 

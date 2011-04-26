@@ -431,10 +431,11 @@ trait Logic[T[_]] { L =>
   // no abstract type T[A] but otherwise as before
 }
 {% endhighlight %}
-Neither alternative provides the expressivity of OCaml modules: with
-abstract types, consumers of `Logic` cannot return values of `T[A]`
-(as we saw above); with a type parameter, they can, but the
-type is no longer abstract.
+Neither alternative provides the expressivity of OCaml modules
+(*but see addendum below*):
+with abstract types, consumers of `Logic` cannot
+return values of `T[A]` (as we saw above); with a type parameter, they
+can, but the type is no longer abstract.
 
 In OCaml we would write
 {% highlight ocaml %}
@@ -453,3 +454,59 @@ struct
 end
 {% endhighlight %}
 and get both the abstract type and the ability to return values of the type.
+
+*Addendum*
+
+Jorge Ortiz points out in the comments that it is possible to keep
+`T[A]` abstract and also return its values from `Bridge`, by making
+the `Logic` argument a (public) `val`. We can then remove the
+`private`s, and write `search` as just:
+
+{% highlight scala %}
+  def search: T[List[State]] = {
+    val start = List(State(Person.all, true, 60))
+    for { path <- tree(start); if path.head.left == Nil }
+    yield path
+  }
+{% endhighlight %}
+
+instead of baking `run` into it. Now, if we write
+`val b = new Bridge(LogicList)` then `b.search` has type
+`b.Logic.T[List[b.State]]`, and we can call `b.Logic.run` to evaluate
+it.
+
+This is only a modest improvement; what's still missing, compared to
+the OCaml version, is the fact that `LogicList` and `b.Logic` are the
+same module. So we can't call `LogicList.run(b.search)`
+directly. Worse, we can't compose modules which use the same `Logic`
+implementation, because they each have their own incompatibly-typed
+`Logic` member.
+
+I thought there might be a way out of this using singleton types---the
+idea is that a match of a value `v` against a typed pattern where the
+type is `w.type` succeeds when `v eq w` (section 8.2 in the reference
+manual). So we can define
+
+{% highlight scala %}
+def run[A](
+  Logic: Logic,
+  b: Bridge,
+  t: b.Logic.T[A],
+  n: Int): List[A] =
+{
+  Logic match {
+    case l : b.Logic.type => l.run(t, n)
+  }
+}
+{% endhighlight %}
+
+which is accepted, but sadly
+
+{% highlight scala %}
+scala> run[List[b.State]](LogicList, b, b.search, 2)
+<console>:8: error: type mismatch;
+ found   : b.Logic.T[List[b.State]]
+ required: b.Logic.T[List[b.State]]
+       run[List[b.State]](LogicList, b, b.search, 2)
+                                          ^
+{% endhighlight %}

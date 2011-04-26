@@ -1,4 +1,4 @@
-class Bridge(Logic: Logic) {
+class Bridge(val Logic: Logic) {
   import Logic._
 
   object Person extends Enumeration {
@@ -14,11 +14,11 @@ class Bridge(Logic: Logic) {
                    lightOnLeft: Boolean,
                    timeRemaining: Int)
 
-  private def chooseTwo(list: List[Person]): T[(Person,Person)] =
+  def chooseTwo(list: List[Person]): T[(Person,Person)] =
     for { p1 <- or(list); p2 <- or(list); if p1 < p2 }
     yield (p1, p2)
 
-  private def next(state: State): T[State] = {
+  def next(state: State): T[State] = {
     if (state.lightOnLeft) {
       for {
         (p1, p2) <- chooseTwo(state.left)
@@ -40,18 +40,16 @@ class Bridge(Logic: Logic) {
     }
   }
 
-  private def tree(path: List[State]): T[List[State]] =
+  def tree(path: List[State]): T[List[State]] =
     unit(path) |
       (for {
          state <- next(path.head)
          path <- tree(state :: path)
        } yield path)
 
-  def search(n: Int): List[List[State]] = {
+  def search: T[List[State]] = {
     val start = List(State(Person.all, true, 60))
-    val t =
-      for { path <- tree(start); if path.head.left == Nil }
-      yield path
-    run(t, n)
+    for { path <- tree(start); if path.head.left == Nil }
+    yield path
   }
 }
