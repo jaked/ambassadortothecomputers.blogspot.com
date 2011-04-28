@@ -16,7 +16,8 @@ object LogicSFK extends Logic {
 
   def or[A](t1: T[A], t2: => T[A]) =
     new T[A] {
-      def apply[R](sk: SK[A,R], fk: FK[R]) = t1(sk, { () => t2(sk, fk) })
+      def apply[R](sk: SK[A,R], fk: FK[R]) =
+        t1(sk, { () => t2(sk, fk) })
     }
 
   def bind[A,B](t: T[A], f: A => T[B]) =
@@ -33,8 +34,11 @@ object LogicSFK extends Logic {
 
   def filter[A](t: T[A], p: A => Boolean) =
     new T[A] {
-      def apply[R](sk: SK[A,R], fk: FK[R]) =
-        t(({ (a, fk) => if (p(a)) sk(a, fk) else fk() }: SK[A,R]), fk)
+      def apply[R](sk: SK[A,R], fk: FK[R]) = {
+        val sk2: SK[A,R] =
+          { (a, fk) => if (p(a)) sk(a, fk) else fk() }
+        t(sk2, fk)
+      }
     }
 
   def split[A](t: T[A]) = {
