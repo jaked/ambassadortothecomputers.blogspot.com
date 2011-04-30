@@ -32,7 +32,7 @@ object LogicSFKDefuncTailrec extends Logic {
   def filter[A](t: T[A], p: A => Boolean) = Filter(t, p)
 
   def split[A](t2: T[A]): O[A] = {
-    var app = 1
+    var app = 0
     var t = t2.asInstanceOf[T[Any]]
     var a: Any = null
     var r: O[Any] = null
@@ -41,48 +41,48 @@ object LogicSFKDefuncTailrec extends Logic {
     var k: K = KReturn
 
     while (true) {
-      (app: @annotation.switch) match {
-        case 0 => // applyK
-          k match {
-            case KReturn => return r.asInstanceOf[O[A]]
-            case KUnsplit(sk2, fk2, k2) =>
-              r match {
-                case None => { app = 2; fk = fk2; k = k2 }
-                case Some((a2, t2)) => {
-                  app = 1; t = or(unit(a2), t2); sk = sk2
-                  fk = fk2; k = k2
-                }
-              }
-          }
-
-        case 1 => // applyT
+      app match {
+        case 0 => // applyT
           t match {
-            case Fail() => app = 2
-            case Unit(a2) => { a = a2; app = 3 }
+            case Fail() => app = 1
+            case Unit(a2) => { a = a2; app = 2 }
             case Or(t1, t2) => { t = t1; fk = FKOr(t2, sk, fk) }
             case Bind(t2, f) => { t = t2; sk = SKBind(f, sk) }
             case Apply(t2, f) => { t = t2; sk = SKApply(f, sk) }
             case Filter(t2, p) => { t = t2; sk = SKFilter(p, sk) }
             case Unsplit(fk2) => {
-              app = 2; k = KUnsplit(sk, fk, k); fk = fk2
+              app = 1; k = KUnsplit(sk, fk, k); fk = fk2
             }
           }
 
-        case 2 => // applyFK
+        case 1 => // applyFK
           fk match {
             case FKOr(t2, sk2, fk2) => {
-              app = 1; t = t2(); sk = sk2; fk = fk2
+              app = 0; t = t2(); sk = sk2; fk = fk2
             }
-            case FKSplit(r2) => { app = 0; r = r2 }
+            case FKSplit(r2) => { app = 3; r = r2 }
           }
 
-        case 3 => // applySK
+        case 2 => // applySK
           sk match {
-            case SKBind(f, sk2) => { app = 1; t = f(a); sk = sk2 }
+            case SKBind(f, sk2) => { app = 0; t = f(a); sk = sk2 }
             case SKApply(f, sk2) => { sk = sk2; a = f(a) }
             case SKFilter(p, sk2) =>
-              if (p(a)) sk = sk2 else app = 2
-            case SKSplit(rf) => { app = 0; r = rf(a, fk) }
+              if (p(a)) sk = sk2 else app = 1
+            case SKSplit(rf) => { app = 3; r = rf(a, fk) }
+          }
+
+        case 3 => // applyK
+          k match {
+            case KReturn => return r.asInstanceOf[O[A]]
+            case KUnsplit(sk2, fk2, k2) =>
+              r match {
+                case None => { app = 1; fk = fk2; k = k2 }
+                case Some((a2, t2)) => {
+                  app = 0; t = or(unit(a2), t2); sk = sk2
+                  fk = fk2; k = k2
+                }
+              }
           }
       }
     }

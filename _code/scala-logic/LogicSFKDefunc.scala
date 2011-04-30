@@ -10,6 +10,13 @@ object LogicSFKDefunc extends Logic {
   case class Filter[A](t: T[A], p: A => Boolean) extends T[A]
   case class Unsplit[A](fk: FK[O[A]]) extends T[A]
 
+  def fail[A] = Fail()
+  def unit[A](a: A) = Unit(a)
+  def or[A](t1: T[A], t2: => T[A]) = Or(t1, { () => t2 })
+  def bind[A,B](t: T[A], f: A => T[B]) = Bind(t, f)
+  def apply[A,B](t: T[A], f: A => B) = Apply(t, f)
+  def filter[A](t: T[A], p: A => Boolean) = Filter(t, p)
+
   sealed trait FK[R]
   case class FKOr[A,R](t: () => T[A], sk: SK[A,R], fk: FK[R])
     extends FK[R]
@@ -29,25 +36,7 @@ object LogicSFKDefunc extends Logic {
   case class KUnsplit[A,R,R2](sk: SK[A,R], fk:FK[R], k: K[R,R2])
     extends K[O[A],R2]
 
-  def fail[A] = Fail()
-  def unit[A](a: A) = Unit(a)
-  def or[A](t1: T[A], t2: => T[A]) = Or(t1, { () => t2 })
-  def bind[A,B](t: T[A], f: A => T[B]) = Bind(t, f)
-  def apply[A,B](t: T[A], f: A => B) = Apply(t, f)
-  def filter[A](t: T[A], p: A => Boolean) = Filter(t, p)
-
   def split[A](t: T[A]) = {
-
-    def applyK[R,R2](k: K[R,R2], r: R): R2 =
-      k match {
-        case KReturn() => r.asInstanceOf[R2]
-        case KUnsplit(sk, fk, k) => {
-          r match {
-            case None => applyFK(fk, k)
-            case Some((a, t)) => applyT(or(unit(a), t), sk, fk, k)
-          }
-        }
-      }
 
     def applyT[A,R,R2]
       (t: T[A], sk: SK[A,R], fk: FK[R], k: K[R,R2]): R2 =
@@ -75,6 +64,17 @@ object LogicSFKDefunc extends Logic {
         case SKFilter(p, sk) =>
           if (p(a)) applySK(sk, a, fk, k) else applyFK(fk, k)
         case SKSplit(rf) => applyK(k, rf(a, fk))
+      }
+
+    def applyK[R,R2](k: K[R,R2], r: R): R2 =
+      k match {
+        case KReturn() => r.asInstanceOf[R2]
+        case KUnsplit(sk, fk, k) => {
+          r match {
+            case None => applyFK(fk, k)
+            case Some((a, t)) => applyT(or(unit(a), t), sk, fk, k)
+          }
+        }
       }
 
     applyT[A,O[A],O[A]](
