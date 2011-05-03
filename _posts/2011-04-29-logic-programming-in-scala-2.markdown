@@ -145,7 +145,7 @@ from the `bind`), and the failure continuation in force at the point
 `a` was generated (which succeeds with the next available alternative
 from `f(a)`).
 
-For `map` things are simpler, since `f(a)` returns a single value
+For `apply` things are simpler, since `f(a)` returns a single value
 rather than a choice of alternatives: we succeed immediately with the
 returned value.
 
@@ -565,6 +565,9 @@ wait to complete):
 scala> run(nat, 100000)
 ^C
 {% endhighlight %}
+
+See the complete code
+[here](https://github.com/jaked/ambassadortothecomputers.blogspot.com/tree/master/_code/scala-logic).
 
 Next time we'll thread state through this backtracking logic monad,
 and use it to implement unification.

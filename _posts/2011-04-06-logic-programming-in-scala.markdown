@@ -510,3 +510,31 @@ scala> run[List[b.State]](LogicList, b, b.search, 2)
        run[List[b.State]](LogicList, b, b.search, 2)
                                           ^
 {% endhighlight %}
+
+*Addendum addendum*
+
+Some further advice from Jorge Ortiz: the specific type of `Logic`
+(not just `Logic.type`) can be exposed outside `Bridge` either through
+polymorphism:
+
+{% highlight scala %}
+class Bridge[L <: Logic](val Logic: L) {
+  ...
+}
+
+val b = new Bridge(LogicList)
+{% endhighlight %}
+
+or by defining an abstract value (this works the same if `Bridge` is a
+trait):
+
+{% highlight scala %}
+abstract class Bridge {
+  val Logic: Logic
+  ...
+}
+
+val b = new Bridge { val Logic = LogicList }
+{% endhighlight %}
+
+So we can compose uses of `T` but it remains abstract.
