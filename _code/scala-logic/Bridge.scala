@@ -1,4 +1,5 @@
-class Bridge[L <: Logic](val Logic: L) {
+trait Bridge {
+  val Logic: Logic
   import Logic._
 
   object Person extends Enumeration {
