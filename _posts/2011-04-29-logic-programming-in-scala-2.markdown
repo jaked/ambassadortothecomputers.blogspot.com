@@ -442,120 +442,121 @@ Finally we apply the input `T` in correspondence to the original `split`.
 
 <b>Tail call elimination</b>
 
+(This section has been revised; you can see the original
+[here](https://github.com/jaked/ambassadortothecomputers.blogspot.com/tree/ba9621fc48ff84e01d9f70d076cc912b8185729d).)
+
 To eliminate the stack frames from tail calls, we next rewrite the
-four mutually-recursive functions into a single `while` loop. To do
-this we have to abandon some type safety (but only in the
-implementation of the `Logic` monad; we'll still present the same safe
-interface).
+four mutually-recursive functions into a single recursive function
+(which Scala compiles as a loop). To do this we have to abandon some
+type safety (but only in the implementation of the `Logic` monad;
+we'll still present the same safe interface).
 
 {% highlight scala %}
 object LogicSFKDefuncTailrec extends Logic {
   type O[A] = Option[(A,T[A])]
 
-  sealed trait T[A]
-  case class Fail[A]() extends T[A]
-  case class Unit[A](a: A) extends T[A]
-  case class Or[A](t1: T[A], t2: () => T[A]) extends T[A]
-  case class Bind[A,B](t: T[A], f: A => T[B]) extends T[B]
-  case class Apply[A,B](t: T[A], f: A => B) extends T[B]
-  case class Filter[A](t: T[A], p: A => Boolean) extends T[A]
-  case class Unsplit[A](fk: FK) extends T[A]
+  type T[A] = I
 
-  def fail[A] = Fail()
-  def unit[A](a: A) = Unit(a)
-  def or[A](t1: T[A], t2: => T[A]) = Or(t1, { () => t2 })
-  def bind[A,B](t: T[A], f: A => T[B]) = Bind(t, f)
-  def apply[A,B](t: T[A], f: A => B) = Apply(t, f)
-  def filter[A](t: T[A], p: A => Boolean) = Filter(t, p)
+  sealed trait I
+  case class Fail() extends I
+  case class Unit(a: Any) extends I
+  case class Or(t1: I, t2: () => I) extends I
+  case class Bind(t: I, f: Any => I) extends I
+  case class Apply(t: I, f: Any => Any) extends I
+  case class Filter(t: I, p: Any => Boolean) extends I
+  case class Unsplit(fk: I) extends I
 
-  sealed trait FK
-  case class FKOr(t: () => T[Any], sk: SK, fk: FK) extends FK
-  case class FKSplit(r: O[Any]) extends FK
+  case class FKOr(t: () => I, sk: I, fk: I) extends I
+  case class FKSplit(r: O[Any]) extends I
 
-  sealed trait SK
-  case class SKBind(f: Any => T[Any], sk: SK) extends SK
-  case class SKApply(f: Any => Any, sk: SK) extends SK
-  case class SKFilter(p: Any => Boolean, sk: SK) extends SK
-  case class SKSplit(r: (Any, FK) => O[Any]) extends SK
+  case class SKBind(f: Any => I, sk: I) extends I
+  case class SKApply(f: Any => Any, sk: I) extends I
+  case class SKFilter(p: Any => Boolean, sk: I) extends I
+  case class SKSplit(r: (Any, I) => O[Any]) extends I
 
-  sealed trait K
-  case object KReturn extends K
-  case class KUnsplit(sk: SK, fk: FK, k: K) extends K
+  case object KReturn extends I
+  case class KUnsplit(sk: I, fk: I, k: I) extends I
 {% endhighlight %}
 
-This is all as before except that we erase the type variables on the
-continuations. Recursive calls in the original code are made with
-different type arguments (e.g. in `bind`, where from a call to a
-`T[A]` we call a `T[B]`), but we'll use a single set of `var`s to hold
-the function arguments for every call.
+This is all pretty much as before except that we erase all the type
+parameters. Having done so we can combine the four defunctionalized
+types into a single type `I` (for "instruction" perhaps), which will
+allow us to write a single recursive `apply` function. The type
+parameter in `T[A]` is then a _phantom type_ since it does not appear
+on the right-hand side of the definition; it is used only to enforce
+constraints outside the module.
 
 {% highlight scala %}
-  def split[A](t2: T[A]): O[A] = {
-    var app = 0
-    var t = t2.asInstanceOf[T[Any]]
-    var a: Any = null
-    var r: O[Any] = null
-    var sk: SK = SKSplit((a, fk) => Some((a, Unsplit(fk))))
-    var fk: FK = FKSplit(None)
-    var k: K = KReturn
+  def fail[A]: T[A] = Fail()
+  def unit[A](a: A): T[A] = Unit(a)
+  def or[A](t1: T[A], t2: => T[A]): T[A] = Or(t1, { () => t2 })
+  def bind[A,B](t: T[A], f: A => T[B]): T[B] =
+    Bind(t, f.asInstanceOf[Any => I])
+  def apply[A,B](t: T[A], f: A => B): T[B] =
+    Apply(t, f.asInstanceOf[Any => I])
+  def filter[A](t: T[A], p: A => Boolean): T[A] =
+    Filter(t, p.asInstanceOf[Any => Boolean])
+{% endhighlight %}
 
-    while (true) {
-      app match {
-        case 0 => // applyT
-          t match {
-            case Fail() => app = 1
-            case Unit(a2) => { a = a2; app = 2 }
-            case Or(t1, t2) => { t = t1; fk = FKOr(t2, sk, fk) }
-            case Bind(t2, f) => { t = t2; sk = SKBind(f, sk) }
-            case Apply(t2, f) => { t = t2; sk = SKApply(f, sk) }
-            case Filter(t2, p) => { t = t2; sk = SKFilter(p, sk) }
-            case Unsplit(fk2) => {
-              app = 1; k = KUnsplit(sk, fk, k); fk = fk2
-            }
-          }
+The functions for building `T[A]` values are mostly the same. We have
+to cast passed-in functions since `Any` is not a subtype of arbitrary
+`A`. The return type annotations don't seem necessary but I saw some
+strange type errors without them (possibly related to the phantom
+type?) when using the `Logic.Syntax` wrapper.
 
-        case 1 => // applyFK
-          fk match {
-            case FKOr(t2, sk2, fk2) => {
-              app = 0; t = t2(); sk = sk2; fk = fk2
-            }
-            case FKSplit(r2) => { app = 3; r = r2 }
-          }
+{% highlight scala %}
+def split[A](t: T[A]): O[A] = {
+  def apply(i: I, a: Any, r: O[Any], sk: I, fk: I, k: I): O[Any] =
+    i match {
+      case Fail() => apply(fk, null, null, null, null, k)
+      case Unit(a) => apply(sk, a, null, null, fk, k)
+      case Or(t1, t2) =>
+        apply(t1, null, null, sk, FKOr(t2, sk, fk), k)
+      case Bind(t, f) =>
+        apply(t, null, null, SKBind(f, sk), fk, k)
+      case Apply(t, f) =>
+        apply(t, null, null, SKApply(f, sk), fk, k)
+      case Filter(t, p) =>
+        apply(t, null, null, SKFilter(p, sk), fk, k)
+      case Unsplit(fk2) =>
+        apply(fk2, null, null, null, null, KUnsplit(sk, fk, k))
 
-        case 2 => // applySK
-          sk match {
-            case SKBind(f, sk2) => { app = 0; t = f(a); sk = sk2 }
-            case SKApply(f, sk2) => { sk = sk2; a = f(a) }
-            case SKFilter(p, sk2) =>
-              if (p(a)) sk = sk2 else app = 1
-            case SKSplit(rf) => { app = 3; r = rf(a, fk) }
-          }
+      case FKOr(t, sk, fk) => apply(t(), null, null, sk, fk, k)
+      case FKSplit(r) => apply(k, null, r, null, null, null)
 
-        case 3 => // applyK
-          k match {
-            case KReturn => return r.asInstanceOf[O[A]]
-            case KUnsplit(sk2, fk2, k2) =>
-              r match {
-                case None => { app = 1; fk = fk2; k = k2 }
-                case Some((a2, t2)) => {
-                  app = 0; t = or(unit(a2), t2); sk = sk2
-                  fk = fk2; k = k2
-                }
-              }
-          }
+      case SKBind(f, sk) => apply(f(a), null, null, sk, fk, k)
+      case SKApply(f, sk) => apply(sk, f(a), null, null, fk, k)
+      case SKFilter(p, sk) =>
+        if (p(a))
+          apply(sk, a, null, null, fk, k)
+        else
+          apply(fk, null, null, null, null, k)
+      case SKSplit(rf) =>
+        apply(k, null, rf(a, fk), null, null, null)
+
+      case KReturn => r
+      case KUnsplit(sk, fk, k) => {
+        r match {
+          case None => apply(fk, null, null, null, null, k)
+          case Some((a, t)) =>
+            apply(or(unit(a), t), null, null, sk, fk, k)
+        }
       }
     }
-    throw new Exception("not reached")
-  }
+
+  apply(t,
+        null,
+        null,
+        SKSplit((a, fk) => Some((a, Unsplit(fk)))),
+        FKSplit(None),
+        KReturn).asInstanceOf[O[A]]
 }
 {% endhighlight %}
 
-The arguments for all the functions are kept in a set of `var`s, with
-an additional argument `app` to indicate which function we're in. To
-tail-call a function we just set the appropriate argument variables,
-set `app` to the function we want to call, then go around the loop
-again. (In cases where the new value of an argument is always the same
-as the old value, we don't even need to set it.)
+The original functions took varying arguments; the single function
+takes all the arguments which the original ones did. We pass `null`
+for unused arguments in each call, but otherwise the cases are the
+same as before.
 
 Now we can evaluate `nat` to large N without running out of stack (but
 since the running time is quadratic it takes longer than I care to
