@@ -38,11 +38,16 @@ object LogicSFKDefuncTailrec extends Logic {
       i match {
         case Fail() => apply(fk, null, null, null, null, k)
         case Unit(a) => apply(sk, a, null, null, fk, k)
-        case Or(t1, t2) => apply(t1, null, null, sk, FKOr(t2, sk, fk), k)
-        case Bind(t, f) => apply(t, null, null, SKBind(f, sk), fk, k)
-        case Apply(t, f) => apply(t, null, null, SKApply(f, sk), fk, k)
-        case Filter(t, p) => apply(t, null, null, SKFilter(p, sk), fk, k)
-        case Unsplit(fk2) => apply(fk2, null, null, null, null, KUnsplit(sk, fk, k))
+        case Or(t1, t2) =>
+          apply(t1, null, null, sk, FKOr(t2, sk, fk), k)
+        case Bind(t, f) =>
+          apply(t, null, null, SKBind(f, sk), fk, k)
+        case Apply(t, f) =>
+          apply(t, null, null, SKApply(f, sk), fk, k)
+        case Filter(t, p) =>
+          apply(t, null, null, SKFilter(p, sk), fk, k)
+        case Unsplit(fk2) =>
+          apply(fk2, null, null, null, null, KUnsplit(sk, fk, k))
 
         case FKOr(t, sk, fk) => apply(t(), null, null, sk, fk, k)
         case FKSplit(r) => apply(k, null, r, null, null, null)
@@ -54,13 +59,15 @@ object LogicSFKDefuncTailrec extends Logic {
             apply(sk, a, null, null, fk, k)
           else
             apply(fk, null, null, null, null, k)
-        case SKSplit(rf) => apply(k, null, rf(a, fk), null, null, null)
+        case SKSplit(rf) =>
+          apply(k, null, rf(a, fk), null, null, null)
 
         case KReturn => r
         case KUnsplit(sk, fk, k) => {
           r match {
             case None => apply(fk, null, null, null, null, k)
-            case Some((a, t)) => apply(or(unit(a), t), null, null, sk, fk, k)
+            case Some((a, t)) =>
+              apply(or(unit(a), t), null, null, sk, fk, k)
           }
         }
       }
