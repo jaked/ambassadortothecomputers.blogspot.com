@@ -12,8 +12,11 @@ trait Logic { L =>
   def or[A](as: List[A]): T[A] =
     as.foldRight(fail[A])((a, t) => or(unit(a), t))
 
+  def seq[A](t1: T[Unit], t2: => T[A]): T[A] =
+    bind(t1, { _: Unit => t2 })
+
   def fair_or[A](t1: T[A], t2: => T[A]): T[A] =
-    bind(unit(()), { _: Unit =>
+    seq(unit(()), {
       split(t1) match {
         case None => t2
         case Some((a, t)) => or(unit(a), fair_or(t2, t))
@@ -21,7 +24,7 @@ trait Logic { L =>
     })
 
   def fair_bind[A,B](t: T[A], f: A => T[B]): T[B] =
-    bind(unit(()), { _: Unit =>
+    seq(unit(()), {
       split(t) match {
         case None => fail
         case Some((a, t)) => fair_or(f(a), fair_bind(t, f))
@@ -29,7 +32,7 @@ trait Logic { L =>
     })
 
   def ifte[A,B](t: T[A], th: A => T[B], el: T[B]): T[B] =
-    bind(unit(()), { _: Unit =>
+    seq(unit(()), {
       split(t) match {
         case None => el
         case Some((a, t)) => or(th(a), bind(t, th))
@@ -37,7 +40,7 @@ trait Logic { L =>
     })
 
   def once[A](t: T[A]): T[A] =
-    bind(unit(()), { _: Unit =>
+    seq(unit(()), {
       split(t) match {
         case None => fail
         case Some((a, _)) => unit(a)

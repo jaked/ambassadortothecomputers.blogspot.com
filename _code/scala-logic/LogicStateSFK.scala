@@ -16,7 +16,8 @@ object LogicStateSFK extends LogicState {
 
   def or[S,A](t1: T[S,A], t2: => T[S,A]) =
     new T[S,A] {
-      def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) = t1(s, sk, { () => t2(s, sk, fk) })
+      def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) =
+        t1(s, sk, { () => t2(s, sk, fk) })
     }
 
   def bind[S,A,B](t: T[S,A], f: A => T[S,B]) =
@@ -33,22 +34,21 @@ object LogicStateSFK extends LogicState {
 
   def filter[S,A](t: T[S,A], p: A => Boolean) =
     new T[S,A] {
-      def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) =
-        t(s, ({ (s, a, fk) => if (p(a)) sk(s, a, fk) else fk() }: SK[S,A,R]), fk)
+      def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) = {
+        val sk2 : SK[S,A,R] =
+          { (s, a, fk) => if (p(a)) sk(s, a, fk) else fk() }
+        t(s, sk2, fk)
+      }
     }
 
   def split[S,A](s: S, t: T[S,A]) = {
-    def stateUnit[S,A](s: S, a: A): T[S,A] =
-      new T[S,A] {
-        def apply[R](s: S, sk: SK[S,A,R], fk: FK[R]) = sk(s, a, fk)
-      }
-    def unsplit(r: () => Option[(S,A,T[S,A])]): T[S,A] =
-      r() match {
+    def unsplit(fk: FK[Option[(S,A,T[S,A])]]): T[S,A] =
+      fk() match {
         case None => fail
-        case Some((s, a, t)) => or(stateUnit(s, a), t)
+        case Some((s, a, t)) => or(setUnit(s, a), t)
       }
     def sk : SK[S,A,Option[(S,A,T[S,A])]] =
-      { (s, a, fk) => Some((s, a, unit(fk).flatMap(unsplit))) }
+      { (s, a, fk) => Some((s, a, bind(unit(fk), unsplit))) }
     t(s, sk, { () => None })
   }
 
