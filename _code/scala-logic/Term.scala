@@ -9,9 +9,11 @@ class Env(m: Map[Evar[Any],Term[Any]]) {
   def get[A](v: Evar[A]): Option[Term[A]] =
     m.get(v.asInstanceOf[Evar[Any]]).asInstanceOf[Option[Term[A]]]
   def updated[A](v: Evar[A], t: Term[A]): Env = {
-    val e2 = Env.empty.updated(v, t)
+    val v2 = v.asInstanceOf[Evar[Any]]
+    val t2 = t.asInstanceOf[Term[Any]]
+    val e2 = Env(Map(v2 -> t2))
     val m2 = m.mapValues(_.subst(e2))
-    Env(m2.updated(v.asInstanceOf[Evar[Any]], t.asInstanceOf[Term[Any]]))
+    Env(m2.updated(v2, t2))
   }
 
   override def toString = {
@@ -24,21 +26,12 @@ object Env {
 }
 
 trait Term[A] {
+  // invariant: on call to unify, this and t have e substituted
   def unify(e: Env, t: Term[A]): Option[Env]
+
   def occurs[B](v: Evar[B]): Boolean
   def subst(e: Env): Term[A]
   def ground(e: Env): A
-
-  import LogicStateSFK._
-  def =!=(t2: Term[A]): T[Env, Unit] =
-    for {
-      env <- get
-      env2 <-
-      (subst(env).unify(env, t2.subst(env)) match {
-        case None => fail[Env,Unit]
-        case Some(e) => set(e)
-      })
-    } yield env2
 }
 
 case class VarTerm[A](v: Evar[A]) extends Term[A] {
@@ -98,7 +91,7 @@ case class Tuple2Term[A,B](_1: Term[A], _2: Term[B]) extends Term[(A,B)] {
   def subst(e: Env) = Tuple2Term(_1.subst(e), _2.subst(e))
   def ground(e: Env) = (_1.ground(e), _2.ground(e))
 
-  override def toString = { (_1, _2).toString }
+    override def toString = { (_1, _2).toString }
 }
 
 case class NilTerm[A]() extends Term[List[A]] {
@@ -136,21 +129,14 @@ case class ConsTerm[A](hd: Term[A], tl: Term[List[A]]) extends Term[List[A]] {
 }
 
 object Term {
-  implicit def var2term[A](v: Evar[A]): VarTerm[A] = VarTerm(v)
-  //implicit def lit2term[A](a: A): LitTerm[A] = LitTerm(a)
-  implicit def int2term(a: Int): LitTerm[Int] = LitTerm(a)
-  implicit def tuple2term[A,B](ab: Tuple2[Term[A],Term[B]]): Tuple2Term[A,B] =
+  implicit def var2Term[A](v: Evar[A]): Term[A] = VarTerm(v)
+  //implicit def lit2term[A](a: A): Term[A] = LitTerm(a)
+  implicit def int2Term(a: Int): Term[Int] = LitTerm(a)
+  implicit def tuple2Term[A,B](ab: Tuple2[Term[A],Term[B]]): Term[(A,B)] =
     Tuple2Term(ab._1, ab._2)
-  implicit def list2term[A](l: List[Term[A]]): Term[List[A]] =
+  implicit def list2Term[A](l: List[Term[A]]): Term[List[A]] =
     l match {
       case Nil => NilTerm[A]
-      case hd :: tl => ConsTerm(hd, list2term(tl))
+      case hd :: tl => ConsTerm(hd, list2Term(tl))
     }
-}
-
-object Run {
-  import LogicStateSFK._
-
-  def run[A](t: T[Env,Unit], n: Int, tm: Term[A]): List[Term[A]] =
-    LogicStateSFK.run(Env.empty, t, n).map({ case (e, _) => tm.subst(e) })
 }
