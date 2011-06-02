@@ -1,5 +1,3 @@
-import Term._
-
 trait Test {
   val Scrolog: Scrolog
   import Scrolog._
@@ -24,7 +22,7 @@ trait Test {
 
     def occurs[A](v: Evar[A]) = false
     def subst(e: Env) = this
-    def ground(e: Env) = Z
+    def ground = Z
 
     override def toString = { Z.toString }
   }
@@ -39,7 +37,7 @@ trait Test {
 
     def occurs[A](v: Evar[A]) = n.occurs(v)
     def subst(e: Env) = STerm(n.subst(e))
-    def ground(e: Env) = S(n.ground(e))
+    def ground = S(n.ground)
 
     override def toString = { "S(" + n.toString + ")" }
   }
@@ -51,7 +49,7 @@ trait Test {
     }
 
   def sum(m: Term[Nat], n: Term[Nat], p: Term[Nat]): P = {
-    val m2 = Evar[Nat]("m2"); val p2 = Evar[Nat]("p2")
+    val m2 = Evar[Nat]("m"); val p2 = Evar[Nat]("p")
     (m =:= Z & n =:= p) |
     (m =:= STerm(m2) & p =:= STerm(p2) & sum(m2, n, p2))
   }

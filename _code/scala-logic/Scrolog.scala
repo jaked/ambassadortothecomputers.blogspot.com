@@ -21,14 +21,9 @@ trait Scrolog {
   def println(m: String): P = unit(Console.println(m))
 
   implicit def termSyntax[A](t: Term[A]) = new TermSyntax(t)
-  implicit def varTermSyntax[A](t: VarTerm[A]) = new TermSyntax(t)
-  implicit def litTermSyntax[A](t: LitTerm[A]) = new TermSyntax(t)
-  implicit def tuple2TermSyntax[A,B](t: Tuple2Term[A,B]) = new TermSyntax(t)
-  implicit def nilTermSyntax[A](t: NilTerm[A]) = new TermSyntax(t)
-  implicit def consTermSyntax[A](t: ConsTerm[A]) = new TermSyntax(t)
-
   implicit def syntax[A](t: P) = LogicState.syntax(t)
 
-  def run[A](t: P, n: Int, tm: Term[A]): List[Term[A]] =
-    LogicState.run(Env.empty, t, n).map({ case (e, _) => tm.subst(e) })
+  def run[A](t: P, n: Int, tm: Term[A]*): List[Seq[Term[A]]] =
+    LogicState.run(Env.empty, t, n)
+      .map({ case (e, _) => tm.map(_.subst(e)) })
 }

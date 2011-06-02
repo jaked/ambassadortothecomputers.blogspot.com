@@ -56,7 +56,7 @@ trait LogicState { L =>
     def runAcc(t: T[S,A], n: Int, acc: List[(S,A)]): List[(S,A)] =
       if (n <= 0) acc.reverse else
         split(s0, t) match {
-          case None => acc
+          case None => acc.reverse
           case Some((s, a, t)) => runAcc(t, n - 1, (s, a) :: acc)
         }
     runAcc(t, n, Nil)
