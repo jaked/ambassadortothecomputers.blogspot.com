@@ -2,10 +2,10 @@ trait Test {
   val Scrolog: Scrolog
   import Scrolog._
 
-  def member[A](x: Term[A], l: Term[List[A]]): P = {
+  def member[A](x: Term[A], l: Term[List[A]]): G = {
     val hd = Evar[A]("hd"); val tl = Evar[List[A]]("tl")
-    ConsTerm(hd, tl) =:= l &
-    (x =:= hd | member(x, tl))
+    ConsTerm(x, tl) =:= l |
+    (ConsTerm(hd, tl) =:= l & member(x, tl))
   }
 
   sealed trait Nat
@@ -48,7 +48,7 @@ trait Test {
       case S(n) => STerm(nat2Term(n))
     }
 
-  def sum(m: Term[Nat], n: Term[Nat], p: Term[Nat]): P = {
+  def sum(m: Term[Nat], n: Term[Nat], p: Term[Nat]): G = {
     val m2 = Evar[Nat]("m"); val p2 = Evar[Nat]("p")
     (m =:= Z & n =:= p) |
     (m =:= STerm(m2) & p =:= STerm(p2) & sum(m2, n, p2))

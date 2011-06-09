@@ -19,8 +19,10 @@ trait LogicStateT extends LogicState {
     { s: S => Logic.apply(t(s), f2) }
   }
 
-  def filter[S,A](t: T[S,A], p: A => Boolean) =
-    { s: S => Logic.filter(t(s), { sa: (S,A) => p(sa._2) }) }
+  def filter[S,A](t: T[S,A], p: A => Boolean) = {
+    val p2: ((S,A)) => Boolean = { case (_, a) => p(a) }
+    { s: S => Logic.filter(t(s), p2) }
+  }
 
   def split[S,A](s: S, t: T[S,A]) = {
     Logic.split(t(s)) match {

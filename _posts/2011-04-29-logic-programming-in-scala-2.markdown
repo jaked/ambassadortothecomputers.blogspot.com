@@ -252,7 +252,7 @@ We can rewrite `run` with an accumulator to be tail-recursive:
     def runAcc(t: T[A], n: Int, acc: List[A]): List[A] =
       if (n <= 0) acc.reverse else
         split(t) match {
-          case None => acc
+          case None => acc.reverse
           case Some((a, t)) => runAcc(t, n - 1, a :: acc)
         }
     runAcc(t, n, Nil)

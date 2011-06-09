@@ -2,10 +2,10 @@ trait Scrolog {
   val LogicState: LogicState
   import LogicState._
 
-  type P = T[Env,Unit]
+  type G = T[Env,Unit]
 
   class TermSyntax[A](t: Term[A]) {
-    def =:=(t2: Term[A]): P =
+    def =:=(t2: Term[A]): G =
       for {
         env <- get
         env2 <- {
@@ -17,13 +17,13 @@ trait Scrolog {
       } yield env2
   }
 
-  def printEnv: P = for (env <- get) yield Console.println(env)
-  def println(m: String): P = unit(Console.println(m))
+  def printEnv: G = for (env <- get) yield Console.println(env)
+  def println(m: String): G = unit(Console.println(m))
 
   implicit def termSyntax[A](t: Term[A]) = new TermSyntax(t)
-  implicit def syntax[A](t: P) = LogicState.syntax(t)
+  implicit def syntax[A](t: G) = LogicState.syntax(t)
 
-  def run[A](t: P, n: Int, tm: Term[A]*): List[Seq[Term[A]]] =
+  def run[A](t: G, n: Int, tm: Term[A]): List[Term[A]] =
     LogicState.run(Env.empty, t, n)
-      .map({ case (e, _) => tm.map(_.subst(e)) })
+      .map({ case (e, _) => tm.subst(e) })
 }
